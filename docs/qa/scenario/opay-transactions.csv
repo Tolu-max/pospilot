@@ -1,0 +1,3 @@
+Transaction ID,Amount,Service Charge,Fee,Status,Transaction Time,Terminal ID,Type
+QA-OP-001,50000,,150,Successful,2026-06-01 09:00:00,OPA-QA-01,Withdrawal
+QA-OP-002,20000,,,Pending,2026-06-01 09:05:00,OPA-QA-01,Withdrawal

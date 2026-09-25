@@ -1,0 +1,2 @@
+Settlement ID,Settlement Date,Gross Amount,Fee,Expected Settlement,Actual Settlement,Terminal ID,Status
+QA-PP-SET-001,2026-06-01,90000,310,89690,89690,PPA-QA-01,settled

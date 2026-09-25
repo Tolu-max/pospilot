@@ -1,0 +1,2 @@
+Settlement Reference,Terminal Identifier,Settlement Date,Gross Transaction Amount,Provider Fee,Expected Amount,Actual Amount,Status
+QA-GEN-SET-001,GENERIC-TERM-01,2026-09-20,8000.00,24.00,7976.00,7976.00,settled

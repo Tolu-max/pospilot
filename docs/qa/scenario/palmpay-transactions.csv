@@ -1,0 +1,4 @@
+Transaction ID,Order Amount,Agent Fee,Handling Fee,Result,Transaction Time,Device ID,Type
+QA-PP-001,40000,,140,paid,2026-06-01 11:00:00,PPA-QA-01,Withdrawal
+QA-PP-002,50000,,170,approved,2026-06-01 12:00:00,PPA-QA-01,Withdrawal
+QA-PP-003,15000,,,reversed,2026-06-01 13:00:00,PPA-QA-01,Withdrawal

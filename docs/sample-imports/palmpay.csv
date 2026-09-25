@@ -1,0 +1,4 @@
+Transaction ID,Order Amount,Agent Fee,Handling Fee,Result,Transaction Time,Device ID,Type
+PALM-DEMO-001,12500,187.50,25,paid,2026-09-20 13:15:00,PALM-TERM-01,Withdrawal
+PALM-DEMO-002,23000,,46,approved,2026-09-21 09:05:00,PALM-TERM-01,Transfer
+PALM-DEMO-003,7600,200,15.20,failed,2026-09-21 16:20:00,PALM-TERM-01,Withdrawal

@@ -1,0 +1,2 @@
+Settlement ID,Settlement Date,Gross Amount,Fee,Expected Settlement,Actual Settlement,Terminal ID,Status
+QA-OP-SET-001,2026-06-01,50000,150,49850,49800,OPA-QA-01,settled

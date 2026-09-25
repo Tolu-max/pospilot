@@ -1,0 +1,4 @@
+Transaction ID,Amount,Service Charge,Fee,Status,Transaction Time,Terminal ID,Type
+OPAY-DEMO-001,10000,200,50,Successful,2026-09-20 09:15:00,OPAY-TERM-01,Withdrawal
+OPAY-DEMO-002,6500,,32.50,Successful,2026-09-20 10:22:00,OPAY-TERM-01,Transfer
+OPAY-DEMO-003,3500,100,17.50,Pending,2026-09-20 11:05:00,OPAY-TERM-01,Withdrawal

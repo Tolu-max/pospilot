@@ -1,0 +1,2 @@
+Settlement Reference,Settlement Date,Gross Amount,Fees,Expected Settlement,Actual Settlement,Terminal,Status
+QA-MP-SET-001,2026-06-01,45000,160,44840,44840,MP-QA-01,settled
