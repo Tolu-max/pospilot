@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -38,7 +39,8 @@ class EmailVerificationTest extends TestCase
 
         Event::assertDispatched(Verified::class);
         $this->assertTrue($user->fresh()->hasVerifiedEmail());
-        $response->assertRedirect(route('dashboard', absolute: false).'?verified=1');
+        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->assertSame('Email verified. You can now finish setting up your business.', session('inertia.flash_data.toast.message'));
     }
 
     public function test_email_is_not_verified_with_invalid_hash(): void
@@ -54,5 +56,20 @@ class EmailVerificationTest extends TestCase
         $this->actingAs($user)->get($verificationUrl);
 
         $this->assertFalse($user->fresh()->hasVerifiedEmail());
+    }
+
+    public function test_verification_email_delivery_failure_returns_a_retry_status(): void
+    {
+        $user = User::factory()->unverified()->create();
+        $this->mock(TransactionalEmailDelivery::class)
+            ->shouldReceive('send')
+            ->once()
+            ->andReturnFalse();
+
+        $this->actingAs($user)
+            ->from('/verify-email')
+            ->post('/email/verification-notification')
+            ->assertRedirect('/verify-email')
+            ->assertSessionHas('status', 'verification-link-failed');
     }
 }

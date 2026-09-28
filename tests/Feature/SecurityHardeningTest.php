@@ -134,16 +134,15 @@ class SecurityHardeningTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
         AgentProfile::factory()->create(['user_id' => $user->id]);
         Provider::factory()->create(['slug' => 'moniepoint']);
+        config(['provider_secrets.moniepoint_direct_enabled' => true]);
         $this->app->instance(ProviderSecretStore::class, new UnavailableProviderSecretStore);
 
         $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])->putJson('/api/providers/moniepoint/connection', [
             'api_key' => 'fictional-live-key',
-            'webhook_secret' => 'fictional-webhook-secret',
             'business_id' => '43210',
         ])->assertStatus(503)
             ->assertJsonPath('message', 'Provider secret storage is not configured.')
-            ->assertDontSee('fictional-live-key')
-            ->assertDontSee('fictional-webhook-secret');
+            ->assertDontSee('fictional-live-key');
 
         $this->assertDatabaseCount('provider_connections', 0);
     }

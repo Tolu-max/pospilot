@@ -28,8 +28,8 @@ final class AgentOperationsController extends Controller
 
     public function updateProfile(Request $request)
     {
-        $validated = $request->validate(['business_name' => ['sometimes', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:30'], 'country' => ['sometimes', 'string', 'max:100'], 'currency' => ['sometimes', 'string', 'size:3'], 'location' => ['nullable', 'string', 'max:255'], 'onboarding_state' => ['sometimes', Rule::enum(OnboardingState::class)]]);
-        $agent = $request->user()->agentProfile;
+        $validated = $request->validate(['business_name' => ['sometimes', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:30'], 'country' => ['sometimes', 'string', 'max:100'], 'currency' => ['sometimes', 'string', 'size:3'], 'location' => ['nullable', 'string', 'max:255'], 'onboarding_state' => ['sometimes', Rule::enum(OnboardingState::class)], 'selected_provider_slugs' => ['sometimes', 'array', 'max:4'], 'selected_provider_slugs.*' => ['string', Rule::in(['moniepoint', 'opay', 'palmpay', 'other'])]]);
+        $agent = $request->user()->businessAgentProfile();
         if ($agent === null) {
             $agent = AgentProfile::create(['user_id' => $request->user()->id, 'business_name' => $validated['business_name'] ?? 'POS Business', 'country' => 'Nigeria', 'currency' => 'NGN']);
             $request->user()->setRelation('agentProfile', $agent);
@@ -56,7 +56,12 @@ final class AgentOperationsController extends Controller
 
     public function terminals(Request $request)
     {
-        return response()->json(['data' => $this->agent($request)->terminals()->with('provider')->orderBy('name')->get()]);
+        $terminals = $this->agent($request)->terminals()->with('provider')->orderBy('name');
+        if ($request->user()->businessRole() === 'manager') {
+            return response()->json(['data' => $terminals->get(['id', 'name', 'provider_id', 'active'])->map(fn (Terminal $terminal): array => [...$terminal->toArray(), 'provider' => $terminal->provider->only(['id', 'name'])])]);
+        }
+
+        return response()->json(['data' => $terminals->get()]);
     }
 
     public function storeTerminal(Request $request)
@@ -209,9 +214,9 @@ final class AgentOperationsController extends Controller
 
     private function agent(Request $request)
     {
-        abort_unless($request->user()?->agentProfile, 404);
+        abort_unless($request->user()?->businessAgentProfile(), 404);
 
-        return $request->user()->agentProfile;
+        return $request->user()->businessAgentProfile();
     }
 
     private function connectionState(ProviderConnection $connection): string

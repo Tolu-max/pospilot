@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Notifications\SecurityAlertNotification;
 use App\Services\AccountSessionService;
 use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -34,8 +36,12 @@ class NewPasswordController extends Controller
      *
      * @throws ValidationException
      */
-    public function store(Request $request, AccountSessionService $sessions, SecurityEventRecorder $events): RedirectResponse
-    {
+    public function store(
+        Request $request,
+        AccountSessionService $sessions,
+        SecurityEventRecorder $events,
+        TransactionalEmailDelivery $delivery,
+    ): RedirectResponse {
         $request->validate([
             'token' => 'required',
             'email' => 'required|email',
@@ -47,7 +53,7 @@ class NewPasswordController extends Controller
         // database. Otherwise we will parse the error and return the response.
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
-            function ($user) use ($request, $sessions, $events): void {
+            function ($user) use ($request, $sessions, $events, $delivery): void {
                 $user->forceFill([
                     'password' => Hash::make($request->password),
                     'remember_token' => Str::random(60),
@@ -59,6 +65,14 @@ class NewPasswordController extends Controller
 
                 event(new PasswordReset($user));
                 $events->record($user, 'password_changed', $request, ['method' => 'password_reset']);
+                $delivery->send(
+                    fn () => $user->notify(new SecurityAlertNotification(
+                        'Your password was reset',
+                        'A password reset was completed for your POSPilot account. If you did not make this change, sign in and secure your account.',
+                        'For your security, this email does not include account or transaction details.',
+                    )),
+                    'password_reset_completed',
+                );
             }
         );
 

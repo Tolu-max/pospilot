@@ -9,11 +9,11 @@ class TransactionPolicy
 {
     public function view(User $user, Transaction $transaction): bool
     {
-        return $user->agentProfile?->id === $transaction->agent_profile_id;
+        return $user->businessAgentProfile()?->id === $transaction->agent_profile_id;
     }
 
     public function update(User $user, Transaction $transaction): bool
     {
-        return $this->view($user, $transaction);
+        return $user->businessRole() === 'owner' && $this->view($user, $transaction);
     }
 }

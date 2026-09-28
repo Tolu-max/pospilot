@@ -1,0 +1,26 @@
+.dashboard-journey { display: flex; align-items: center; justify-content: space-between; gap: 13px; margin: 0 0 17px; padding: 11px 13px; border: 1px solid #dcebe1; border-radius: 6px; background: #f7fbf8; }
+.dashboard-journey-copy { min-width: 160px; display: grid; gap: 3px; }
+.dashboard-journey-copy strong { color: #31533f; font-size: 9px; }
+.dashboard-journey-copy span { color: #86948b; font-size: 8px; }
+.dashboard-mode-control { display: flex; gap: 3px; padding: 3px; border: 1px solid #e4eae5; border-radius: 5px; background: #fff; }
+.dashboard-mode-control button { min-height: 28px; padding: 0 8px; border: 0; border-radius: 3px; color: #738078; background: transparent; font: 600 8px 'DM Sans', sans-serif; cursor: pointer; }
+.dashboard-mode-control .dashboard-mode-selected { color: #087b51; background: #e5f4e9; }
+.notification-count-badge { position: absolute; top: -4px; right: -5px; min-width: 15px; height: 15px; display: grid; place-items: center; padding: 0 3px; border: 1px solid #fff; border-radius: 99px; color: #fff; background: #d6514d; font: 700 7px 'DM Sans', sans-serif; }
+.notification-title-transactions { margin-top: 4px; border-top: 1px solid #edf0ee; }
+.recon-heading-actions { display: flex; align-items: center; gap: 8px; }
+.recon-mode-stamp { padding: 7px 9px; border: 1px solid #dbe9df; border-radius: 4px; color: #34714e; background: #f1f8f3; font-size: 8px; font-weight: 700; }
+.recon-terminal-assignments { display: grid; gap: 7px; margin: 0; padding: 10px; border: 1px solid #e2e9e4; border-radius: 4px; }
+.recon-terminal-assignments legend { padding: 0 4px; color: #68766d; font-size: 8px; font-weight: 700; }
+.recon-terminal-assignments label { display: flex; align-items: center; gap: 7px; color: #55635a; font-size: 9px; }
+.recon-terminal-assignments input { width: 14px; min-height: 14px; accent-color: #079968; }
+.recon-terminal-assignments > small { color: #929d96; font-size: 8px; }
+.recon-movement-effect { color: #188257 !important; font-weight: 700; }
+.recon-solo-warning { flex-basis: 100%; margin: 0; color: #876b2b; font-size: 8px; line-height: 1.5; }
+@media (max-width: 720px) {
+  .dashboard-journey { align-items: stretch; flex-direction: column; }
+  .dashboard-mode-control { width: 100%; }
+  .dashboard-mode-control button { flex: 1; }
+  .recon-heading-actions { width: 100%; flex-wrap: wrap; }
+  .recon-heading-actions > .recon-text-button { flex: 1; }
+  .recon-mode-stamp { flex: 1; text-align: center; }
+}

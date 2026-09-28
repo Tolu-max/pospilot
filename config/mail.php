@@ -49,6 +49,18 @@ return [
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 
+        'sendbyte' => [
+            'transport' => 'smtp',
+            'scheme' => env('SENDBYTE_SMTP_SCHEME'),
+            'url' => null,
+            'host' => env('SENDBYTE_SMTP_HOST', 'smtp.sendbyte.africa'),
+            'port' => (int) env('SENDBYTE_SMTP_PORT', 587),
+            'username' => env('SENDBYTE_SMTP_USERNAME', 'apikey'),
+            'password' => env('SENDBYTE_API_KEY'),
+            'timeout' => (int) env('SENDBYTE_SMTP_TIMEOUT', 15),
+            'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

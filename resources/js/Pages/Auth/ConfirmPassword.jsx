@@ -1,64 +1,9 @@
-import InputError from '@/Components/InputError';
-import InputLabel from '@/Components/InputLabel';
-import PrimaryButton from '@/Components/PrimaryButton';
-import TextInput from '@/Components/TextInput';
-import GuestLayout from '@/Layouts/GuestLayout';
-import { Head, useForm } from '@inertiajs/react';
+import GuestLayout from '../../Layouts/GuestLayout';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Button, Field, Notice } from '../../Components/PosPilotUI';
 
 export default function ConfirmPassword({ googleReauthenticationUrl }) {
-    const { data, setData, post, processing, errors, reset } = useForm({
-        password: '',
-    });
-
-    const submit = (e) => {
-        e.preventDefault();
-
-        post(route('password.confirm'), {
-            onFinish: () => reset('password'),
-        });
-    };
-
-    return (
-        <GuestLayout>
-            <Head title="Confirm Password" />
-
-            <div className="mb-4 text-sm text-gray-600">
-                This is a secure area of the application. Please confirm your
-                password before continuing.
-            </div>
-
-            <form onSubmit={submit}>
-                <div className="mt-4">
-                    <InputLabel htmlFor="password" value="Password" />
-
-                    <TextInput
-                        id="password"
-                        type="password"
-                        name="password"
-                        value={data.password}
-                        className="mt-1 block w-full"
-                        isFocused={true}
-                        onChange={(e) => setData('password', e.target.value)}
-                    />
-
-                    <InputError message={errors.password} className="mt-2" />
-                </div>
-
-                <div className="mt-4 flex items-center justify-end">
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Confirm
-                    </PrimaryButton>
-                </div>
-            </form>
-
-            {googleReauthenticationUrl && (
-                <a
-                    href={googleReauthenticationUrl}
-                    className="mt-4 flex w-full items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                    Re-authenticate with Google
-                </a>
-            )}
-        </GuestLayout>
-    );
+    const form = useForm({ password: '' });
+    function submit(event) { event.preventDefault(); form.post('/confirm-password', { onFinish: () => form.reset('password') }); }
+    return <GuestLayout><Head title="Confirm your identity" /><h1 className="text-2xl font-black">Confirm it’s you</h1><p className="mt-2 text-sm leading-6 text-slate-600">For your security, please sign in again before changing provider access or sensitive account settings.</p>{form.errors.password && <div className="mt-4"><Notice tone="error">{form.errors.password}</Notice></div>}<form onSubmit={submit} className="mt-6 space-y-4"><Field label="Account password" name="password" type="password" autoComplete="current-password" value={form.data.password} onChange={(event) => form.setData('password', event.target.value)} error={form.errors.password} required autoFocus /><Button type="submit" className="w-full" disabled={form.processing}>{form.processing ? 'Checking…' : 'Confirm password'}</Button></form>{googleReauthenticationUrl && <a href={googleReauthenticationUrl} className="mt-4 flex min-h-12 items-center justify-center rounded-xl border border-brand-line font-bold text-slate-700">Re-authenticate with Google</a>}<p className="mt-4 text-center"><Link href="/profile" className="text-sm font-semibold text-brand-accent">Back to account</Link></p></GuestLayout>;
 }

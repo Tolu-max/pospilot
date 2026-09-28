@@ -10,7 +10,7 @@ class Expense extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['agent_profile_id', 'amount', 'category', 'description', 'expense_date'];
+    protected $fillable = ['agent_profile_id', 'business_membership_id', 'terminal_id', 'business_shift_id', 'amount', 'category', 'description', 'expense_date'];
 
     protected function casts(): array
     {

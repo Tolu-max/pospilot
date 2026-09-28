@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -36,7 +37,8 @@ class AuthenticatedSessionController extends Controller
         $request->session()->passwordConfirmed();
         $events->record($request->user(), 'login', $request, ['method' => 'password']);
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        return redirect()->intended(route('dashboard', absolute: false))
+            ->with('analytics_event', ['name' => 'login_completed', 'id' => (string) Str::uuid()]);
     }
 
     /**

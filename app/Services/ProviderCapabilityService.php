@@ -12,8 +12,11 @@ final class ProviderCapabilityService
     {
         $configured = config('pospilot.provider_capabilities.'.$provider->slug, []);
         $capabilities = [];
-        foreach (['csv_transaction_import', 'csv_settlement_import', 'api_transaction_sync', 'webhook_transactions', 'settlement_sync', 'balance_sync'] as $capability) {
-            $capabilities[$capability] = ProviderCapabilityStatus::tryFrom($configured[$capability] ?? ProviderCapabilityStatus::Unknown->value)?->value ?? ProviderCapabilityStatus::Unknown->value;
+
+        foreach ($configured as $capability => $status) {
+            $capabilities[$capability] = is_string($status)
+                ? (ProviderCapabilityStatus::tryFrom($status)?->value ?? ProviderCapabilityStatus::Unknown->value)
+                : ProviderCapabilityStatus::Unknown->value;
         }
 
         return $capabilities;

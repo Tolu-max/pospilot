@@ -1,37 +1,20 @@
-# Provider Capability Matrix
+# Data source hierarchy and capability matrix
 
-Capability values are centralized in `config/pospilot.php` and exposed by `GET /api/providers`.
+The product source order is OPay Direct, Moniepoint Direct, then Email Statements as the practical fallback. Eligible businesses may use direct and email sources together. Every source must normalize through `NormalizedTransactionData` and `TransactionIngestionService`; the existing financial engine remains authoritative.
 
-| Capability | OPay | Moniepoint | PalmPay | Generic / Other |
+`config/pospilot.php` is the source of truth for direct-provider capability statuses. `GET /api/providers` returns those statuses. A documented API is not an implemented connector, provider approval, sandbox test, or live test.
+
+| Source | Product priority | Current application state | Provider / Google access | External test |
 |---|---|---|---|---|
-| CSV transaction import | supported | supported | supported | supported |
-| CSV settlement import | supported | supported | supported | supported |
-| API transaction sync | planned | planned | planned | unavailable |
-| Webhook transactions | planned | supported* | planned | unavailable |
-| Settlement sync | planned | planned | planned | unavailable |
-| Balance sync | planned | planned | planned | unavailable |
+| OPay Direct | Preferred, first | TN history API is documented; POSPilot API client and historical sync are planned, not implemented. | Eligible OPay Business credentials, identifiers, key material, and allowlisted stable outbound IP are required. | Sandbox: NO. Live: NO. |
+| Moniepoint Direct | Preferred, second | Encrypted credential storage and API introspection test exist. Existing-terminal history is not publicly documented in the reviewed reference; webhook ingestion stays disabled pending verified delivery contract. | Eligible business API key and scopes; production secret manager required. | Sandbox: NO. Live: NO. |
+| Email Statements | Fallback; can also enrich direct records | Gmail discovery and CSV/XLSX statement processing use the shared ingestion pipeline. | Separate Google OAuth for Gmail read access; deployment must enable/configure the feature. | No provider statement schema is certified by listing a provider. |
+| PalmPay Direct | Not available | No direct connector. Use Email Statements if a compatible statement is available. | Official ordinary-agent terminal-history access not established in reviewed docs. | Sandbox: NO. Live: NO. |
 
-`supported` means the current application has a working implementation. `planned` means the internal boundary exists but no production provider integration is enabled. `unavailable` means the capability is not offered for that provider type. `unknown` is the safe fallback for an unconfigured provider slug.
+Feature flags control whether existing UI or code paths are exposed; they do not prove connector completeness or vendor access. OPay and Moniepoint direct feature flags remain disabled until their incomplete or unverified operations are ready. PalmPay direct remains disabled. See [official-source research](providers/DIRECT_PROVIDER_RESEARCH.md) and [provider connection statuses](providers/README.md).
 
-## OPay foundation
+The documented OPay TN history API is not implemented. It requires business/branch IDs, POS serial and bound TN; the inclusive history window is at most seven calendar days and provider IP authorization applies. The OPay POS payment-notification webhook concerns payment orders created through that integration and is not a general existing-terminal activity feed.
 
-The disabled OPay Business connector boundary accommodates:
+Moniepoint's current beta POS reference documents API-key introspection and webhook subscription management but does not establish a general existing-terminal history listing API or a verified callback contract for this application. Its existing webhook ingestion remains disabled.
 
-- `headMerchantId`
-- branch `merchantId`
-- POS serial number
-- client authentication key
-- RSA private/public key material
-- request signing and response verification services
-
-The connector foundation does not contain credentials or make live API calls. Provider secrets are accessed only through `ProviderSecretStore`; production requires a separately configured external secret-manager/KMS adapter. OPay API and webhook work remains disabled until verified documentation, credentials, endpoint requirements, encryption, and signature rules are supplied.
-
-\* Moniepoint webhooks are implemented against the public POS Apps Developer webhook guide, including the documented HMAC signature and unique event ID. The documented payload does not include provider fee; such transactions carry `provider_fee=0.00` and `metadata.provider_fee_supplied=false`. Treat earnings as provisional until a fee-bearing CSV or another verified source is available.
-
-## Moniepoint
-
-Moniepoint supports CSV transaction and settlement imports. A provider-specific signature-verified webhook implementation exists, but its capability remains `planned` until production secret-manager storage and deployment controls are configured. Connection testing uses the documented development key-introspection endpoint only. Transaction history/backfill, settlement sync, balance sync, and production API endpoint configuration remain planned. See [docs/providers/MONIEPOINT.md](providers/MONIEPOINT.md) for the exact scope and known gaps.
-
-## PalmPay
-
-PalmPay remains CSV/import based. API URLs, authentication, webhook signatures, OAuth flows, and payload fields have intentionally not been invented.
+PalmPay's public POS notification product is a bank/provider-partner flow. No ordinary POS agent existing-terminal history API was verified in the reviewed public documentation.

@@ -24,6 +24,10 @@ final class MoniepointWebhookController extends Controller
         MoniepointTransactionNormalizer $normalizer,
         TransactionIngestionService $ingestion,
     ): JsonResponse {
+        if (! config('provider_secrets.moniepoint_webhooks_verified')) {
+            return response()->json(['message' => 'Moniepoint webhook verification is not enabled.'], 503);
+        }
+
         $rawBody = $request->getContent();
         $payload = json_decode($rawBody, true);
         $eventId = (string) $request->header('moniepoint-webhook-id', '');

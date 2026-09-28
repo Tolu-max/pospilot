@@ -1,4 +1,97 @@
 import { useForm } from '@inertiajs/react';
 import AppShell from '../../Layouts/AppShell';
-const money = (value) => `₦${String(value ?? '0.00')}`;
-export default function Show({ transaction }) { const form = useForm({ customer_charge_override: transaction.customer_charge_override || '' }); const submit = (event) => { event.preventDefault(); form.patch(`/transactions/${transaction.id}/customer-charge`); }; return <AppShell title="Transaction details"><div className="mb-4"><a href="/transactions" className="text-sm font-medium text-emerald-700 hover:underline">← Back to transactions</a></div><div className="grid gap-4 lg:grid-cols-3"><section className="rounded-lg border border-slate-200 bg-slate-950 p-5 text-white lg:col-span-2"><p className="text-sm text-slate-300">Principal transaction amount</p><p className="mt-2 text-3xl font-semibold">{money(transaction.amount)}</p><p className="mt-3 text-sm text-slate-300">This principal is not revenue.</p></section><section className="rounded-lg border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">Estimated earnings</p><p className="mt-2 text-2xl font-semibold text-emerald-700">{money(transaction.estimated_earnings)}</p><p className="mt-2 text-sm text-slate-500">Customer charge less provider fee</p></section></div><section className="mt-4 rounded-lg border border-slate-200 bg-white p-5"><h2 className="font-semibold">Financial breakdown</h2><dl className="mt-4 grid gap-4 sm:grid-cols-3"><div><dt className="text-sm text-slate-500">Customer charge</dt><dd className="mt-1 font-semibold">{money(transaction.customer_charge)}</dd><p className="text-xs text-slate-500">{transaction.customer_charge_source}</p></div><div><dt className="text-sm text-slate-500">Provider fee</dt><dd className="mt-1 font-semibold">{money(transaction.provider_fee)}</dd></div><div><dt className="text-sm text-slate-500">Settlement</dt><dd className="mt-1 font-semibold">{transaction.settlement_status}</dd></div></dl><form onSubmit={submit} className="mt-6 border-t border-slate-200 pt-5"><label htmlFor="customer_charge_override" className="text-sm font-semibold">Manual customer charge override</label><p className="mt-1 text-sm text-slate-500">The imported and calculated values remain stored for audit.</p><div className="mt-3 flex flex-col gap-3 sm:flex-row"><input id="customer_charge_override" name="customer_charge_override" inputMode="decimal" placeholder="Leave blank to restore original" value={form.data.customer_charge_override} onChange={(event)=>form.setData('customer_charge_override', event.target.value)} className="min-h-11 rounded-md border-slate-300 focus:border-emerald-600 focus:ring-emerald-600" /><button type="submit" disabled={form.processing} className="min-h-11 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2">{form.processing ? 'Saving…' : 'Save charge'}</button></div>{form.errors.customer_charge_override && <p className="mt-2 text-sm text-red-700">{form.errors.customer_charge_override}</p>}</form></section><section className="rounded-lg border border-slate-200 bg-white p-5"><h2 className="font-semibold">Record details</h2><dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Provider</dt><dd className="mt-1 font-medium">{transaction.provider?.name}</dd></div><div><dt className="text-slate-500">Status</dt><dd className="mt-1 font-medium">{transaction.transaction_status}</dd></div><div><dt className="text-slate-500">Reference</dt><dd className="mt-1 break-all font-medium">{transaction.external_reference || 'Not provided'}</dd></div><div><dt className="text-slate-500">Terminal</dt><dd className="mt-1 font-medium">{transaction.terminal?.name || 'Not provided'}</dd></div><div><dt className="text-slate-500">Transaction time</dt><dd className="mt-1 font-medium">{new Date(transaction.transaction_at).toLocaleString('en-NG')}</dd></div><div><dt className="text-slate-500">Source</dt><dd className="mt-1 font-medium">{transaction.source}{transaction.import_batch ? ` · ${transaction.import_batch.filename}` : ''}</dd></div></dl></section></AppShell>; }
+import { money, dateTime } from '../../lib/api';
+import ProviderLogo from '../../Components/ProviderLogo';
+
+const label = (value) => String(value || 'Not recorded').replaceAll('_', ' ');
+
+export default function Show({ transaction }) {
+    const form = useForm({ customer_charge_override: transaction.customer_charge_override || '' });
+    const financial = transaction.financial_status || {};
+    const isFinal = financial.is_final === true;
+    const isSuccessful = transaction.transaction_status === 'successful';
+    const adjustments = transaction.adjustments || [];
+
+    function save(event) {
+        event.preventDefault();
+        form.patch(`/transactions/${transaction.id}/customer-charge`, { preserveScroll: true });
+    }
+
+    return <AppShell title="Transaction details">
+        <div className="transactions-page transaction-detail-page">
+            <header className="transactions-heading">
+                <div>
+                    <span className="eyebrow"><span className="eyebrow-dot" /> TRANSACTION RECORD</span>
+                    <h1>{transaction.provider?.name || 'Provider transaction'}</h1>
+                    <p>Review each amount separately. The transaction amount is not your earnings.</p>
+                </div>
+                <a href="/transactions" className="tx-action-button">← Transactions</a>
+            </header>
+
+            {!isFinal && <div className="financial-confidence" role="status">
+                <strong>This earnings figure is provisional.</strong>
+                <span>Some provider fee or financial data has not been verified yet{financial.reasons?.length ? ` (${financial.reasons.map(label).join(', ')})` : ''}. Do not treat it as final.</span>
+            </div>}
+
+            <div className="transaction-detail-summary">
+                <section className="transaction-detail-amount">
+                    <span className="tx-detail-label">Transaction amount</span>
+                    <strong>{money(transaction.amount)}</strong>
+                    <p>This is the customer's transaction value, not agent revenue.</p>
+                </section>
+                <section className="transaction-detail-earnings">
+                    <div><span className="tx-detail-label">{isSuccessful ? 'Estimated earnings' : 'Earnings contribution'}</span><span className={`tx-completeness ${isFinal ? 'tx-completeness-final' : 'tx-completeness-provisional'}`}>{!isSuccessful ? 'Not included' : isFinal ? 'Complete data' : 'Provisional'}</span></div>
+                    <strong>{money(transaction.estimated_earnings)}</strong>
+                    <p>{isSuccessful ? 'Customer charge, less recorded provider deductions, plus verified credits.' : 'Only successful transactions contribute to finalized earnings.'}</p>
+                </section>
+            </div>
+
+            <div className="transaction-detail-columns">
+                <section className="transaction-details-panel">
+                    <div className="tx-details-heading"><div><h2>Money breakdown</h2><p>Each amount is shown separately.</p></div></div>
+                    <dl className="tx-financials tx-financials-expanded">
+                        <FinancialRow label="Principal transaction amount" value={money(transaction.amount)} note="Not counted as earnings" />
+                        <FinancialRow label="Customer charge" value={money(transaction.customer_charge)} note={`Source: ${label(transaction.customer_charge_source)}`} />
+                        <FinancialRow label="Provider fee" value={transaction.provider_fee_supplied === false ? 'Not supplied by provider' : money(transaction.provider_fee)} note={transaction.provider_fee_supplied === false ? 'Earnings stay provisional until verified fee data is available.' : 'Provider-reported or recorded fee'} />
+                        {adjustments.filter((adjustment) => adjustment.type !== 'customer_charge').map((adjustment) => <FinancialRow key={adjustment.id} label={`${label(adjustment.type)} (${label(adjustment.direction)})`} value={`${adjustment.direction === 'debit' ? '−' : '+'}${money(adjustment.amount)}`} note={`Source: ${label(adjustment.source)}`} />)}
+                        <div className="tx-financial-row tx-financial-row-emphasis"><span>Estimated earnings contribution</span><strong>{money(transaction.estimated_earnings)}</strong></div>
+                    </dl>
+
+                    <form onSubmit={save} className="transaction-charge-form">
+                        <h3>Correct the customer charge</h3>
+                        <p>A manual override is recorded without removing the imported or calculated value. Leave the field blank to restore that value.</p>
+                        <div className="transaction-charge-form-row">
+                            <label htmlFor="customer-charge-override">Manual charge (₦)</label>
+                            <input id="customer-charge-override" name="customer_charge_override" inputMode="decimal" value={form.data.customer_charge_override} onChange={(event) => form.setData('customer_charge_override', event.target.value)} aria-invalid={Boolean(form.errors.customer_charge_override)} aria-describedby={form.errors.customer_charge_override ? 'charge-override-error' : undefined} />
+                            {form.errors.customer_charge_override && <span id="charge-override-error" className="transaction-form-error">{form.errors.customer_charge_override}</span>}
+                            <button className="tx-action-button tx-action-button-primary" type="submit" disabled={form.processing}>{form.processing ? 'Saving…' : 'Save charge'}</button>
+                        </div>
+                        {form.recentlySuccessful && <p role="status" className="transaction-form-success">Customer charge updated.</p>}
+                    </form>
+                </section>
+
+                <section className="transaction-details-panel">
+                    <div className="tx-details-heading"><div><h2>Record details</h2><p>Provider activity and source information.</p></div></div>
+                    <dl className="tx-detail-meta tx-detail-meta-expanded">
+                        <DetailField label="Transaction status" value={label(transaction.transaction_status)} />
+                        <DetailField label="Settlement status" value={label(transaction.settlement_status)} />
+                        <DetailField label="Provider" value={<span className="detail-provider"><ProviderLogo provider={transaction.provider} size="sm" />{transaction.provider?.name || 'Not recorded'}</span>} />
+                        <DetailField label="Terminal" value={transaction.terminal?.name || 'Not recorded'} />
+                        <DetailField label="Reference" value={transaction.external_reference || 'Not supplied'} />
+                        <DetailField label="Transaction time" value={dateTime(transaction.transaction_at)} />
+                        <DetailField label="Record source" value={label(transaction.source)} />
+                        {transaction.import_batch && <DetailField label="Import file" value={transaction.import_batch.filename} />}
+                    </dl>
+                </section>
+            </div>
+        </div>
+    </AppShell>;
+}
+
+function FinancialRow({ label: title, value, note }) {
+    return <div className="tx-financial-row tx-financial-row-expanded"><span><span>{title}</span>{note && <small>{note}</small>}</span><strong>{value}</strong></div>;
+}
+
+function DetailField({ label: title, value }) {
+    return <div className="tx-detail-field"><span className="tx-detail-label">{title}</span><strong>{value}</strong></div>;
+}

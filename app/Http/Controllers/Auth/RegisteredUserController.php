@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -30,7 +32,7 @@ class RegisteredUserController extends Controller
      *
      * @throws ValidationException
      */
-    public function store(Request $request, SecurityEventRecorder $events): RedirectResponse
+    public function store(Request $request, SecurityEventRecorder $events, TransactionalEmailDelivery $delivery): RedirectResponse
     {
         $request->validate([
             'name' => 'required|string|max:255',
@@ -44,7 +46,7 @@ class RegisteredUserController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        event(new Registered($user));
+        $delivery->send(fn () => event(new Registered($user)), 'email_verification');
 
         Auth::login($user);
         $request->session()->regenerate();
@@ -52,6 +54,7 @@ class RegisteredUserController extends Controller
         $events->record($user, 'account_registered', $request, ['method' => 'password']);
         $events->record($user, 'login', $request, ['method' => 'password']);
 
-        return redirect(route('dashboard', absolute: false));
+        return redirect(route('dashboard', absolute: false))
+            ->with('analytics_event', ['name' => 'signup_completed', 'id' => (string) Str::uuid()]);
     }
 }

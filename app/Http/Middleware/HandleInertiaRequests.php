@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\OnboardingState;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -33,6 +34,18 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
+            ],
+            'workspace' => [
+                'role' => $request->user()?->businessRole(),
+                'business_name' => $request->user()?->businessAgentProfile()?->business_name,
+            ],
+            'workspaceReady' => $request->user()?->businessAgentProfile()?->onboarding_state === OnboardingState::Completed,
+            'analyticsEvent' => fn (): ?array => $request->session()->get('analytics_event'),
+            'features' => [
+                'moniepointDirect' => (bool) config('provider_secrets.moniepoint_direct_enabled'),
+                'opayDirect' => (bool) config('provider_secrets.opay_direct_enabled'),
+                'palmpayDirect' => (bool) config('provider_secrets.palmpay_direct_enabled'),
+                'gmailStatements' => (bool) config('gmail_statement.enabled'),
             ],
         ];
     }

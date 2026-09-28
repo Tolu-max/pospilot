@@ -9,6 +9,6 @@ class ImportBatchPolicy
 {
     public function view(User $user, ImportBatch $batch): bool
     {
-        return $user->agentProfile?->id === $batch->agent_profile_id;
+        return $user->businessRole() === 'owner' && $user->businessAgentProfile()?->id === $batch->agent_profile_id;
     }
 }

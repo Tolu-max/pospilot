@@ -14,7 +14,7 @@ class TransactionImportController extends Controller
 {
     public function create(Request $request)
     {
-        $agent = $request->user()->agentProfile;
+        $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404, 'Agent profile not found.');
         $other = Provider::firstOrCreate(['slug' => 'other'], ['name' => 'Generic / Other', 'status' => ProviderStatus::Active->value]);
 
@@ -24,7 +24,7 @@ class TransactionImportController extends Controller
     public function preview(Request $request, CsvImportService $imports)
     {
         $validated = $request->validate(['provider_id' => 'required|exists:providers,id', 'file' => 'required|file|mimes:csv,txt|max:5120', 'mapping' => 'nullable|array']);
-        $agent = $request->user()->agentProfile;
+        $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404, 'Agent profile not found.');
         $provider = Provider::findOrFail($validated['provider_id']);
         try {
@@ -47,7 +47,7 @@ class TransactionImportController extends Controller
         $validated = $request->validate(['preview_token' => 'required|string']);
         $stored = session('transaction_imports.'.$validated['preview_token']);
         abort_unless($stored && now()->lessThanOrEqualTo($stored['expires_at']), 422, 'This import preview has expired. Please upload the CSV again.');
-        $agent = $request->user()->agentProfile;
+        $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404, 'Agent profile not found.');
         $provider = Provider::findOrFail($stored['provider_id']);
         $result = $imports->importPreview($agent, $provider, $stored['filename'], $stored['preview']);

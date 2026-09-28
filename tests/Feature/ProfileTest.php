@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentProfile;
 use App\Models\User;
+use App\Notifications\SecurityAlertNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -14,6 +16,7 @@ class ProfileTest extends TestCase
     public function test_profile_page_is_displayed(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
 
         $response = $this
             ->actingAs($user)
@@ -25,7 +28,9 @@ class ProfileTest extends TestCase
     public function test_profile_information_can_be_updated(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
         Notification::fake();
+        $previousEmail = $user->email;
 
         $this->actingAs($user)->post('/confirm-password', ['password' => 'password'])->assertRedirect();
 
@@ -44,11 +49,16 @@ class ProfileTest extends TestCase
         $this->assertSame('Test User', $user->name);
         $this->assertSame('test@example.com', $user->email);
         $this->assertNull($user->email_verified_at);
+        Notification::assertSentOnDemand(
+            SecurityAlertNotification::class,
+            fn (SecurityAlertNotification $notification, array $channels, object $notifiable): bool => $notifiable->routes['mail'] === $previousEmail
+        );
     }
 
     public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
 
         $this->actingAs($user)->post('/confirm-password', ['password' => 'password'])->assertRedirect();
 
@@ -68,6 +78,7 @@ class ProfileTest extends TestCase
     public function test_user_can_delete_their_account(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
 
         $this->actingAs($user)->post('/confirm-password', ['password' => 'password'])->assertRedirect();
 
@@ -87,6 +98,7 @@ class ProfileTest extends TestCase
     public function test_correct_password_must_be_provided_to_delete_account(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
 
         $this->actingAs($user)->post('/confirm-password', ['password' => 'password'])->assertRedirect();
 

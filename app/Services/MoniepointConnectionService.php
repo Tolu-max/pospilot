@@ -36,6 +36,8 @@ final class MoniepointConnectionService
                 ->timeout(5)
                 ->get(config('moniepoint.introspection_url'));
             $businesses = $response->json('businesses');
+            $scopes = $response->json('scopes');
+            $environment = $response->json('environment');
             $verified = $response->successful()
                 && is_array($businesses)
                 && collect($businesses)->contains(fn (mixed $business): bool => is_array($business)
@@ -46,10 +48,23 @@ final class MoniepointConnectionService
                 return $this->recordFailure($connection, 'credential_or_business_verification_failed');
             }
 
+            $business = collect($businesses)->first(fn (mixed $business): bool => is_array($business)
+                && isset($business['id'])
+                && (string) $business['id'] === $businessId);
+            $metadata = is_array($connection->metadata) ? $connection->metadata : [];
+            $metadata['moniepoint_introspection'] = [
+                'environment' => is_string($environment) ? $environment : 'unreported',
+                'business_name' => is_array($business) && is_string($business['businessName'] ?? null) ? $business['businessName'] : null,
+                'granted_scopes' => is_array($scopes) ? array_values(array_filter($scopes, 'is_string')) : [],
+                'verified_at' => now()->toISOString(),
+            ];
+
             $connection->update([
                 'connection_status' => ProviderConnectionStatus::Active,
                 'last_sync_status' => 'verified',
                 'last_sync_error' => null,
+                'last_synced_at' => now(),
+                'metadata' => $metadata,
             ]);
             Log::notice('provider_connection_event', [
                 'event' => 'connection_verified',

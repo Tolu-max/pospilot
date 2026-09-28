@@ -41,4 +41,12 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    'cencori' => [
+        'enabled' => (bool) env('FEATURE_CENCORI_BUSINESS_INSIGHT', false),
+        'api_key' => env('CENCORI_API_KEY'),
+        'base_url' => env('CENCORI_BASE_URL', 'https://api.cencori.com/v1'),
+        'model' => env('CENCORI_MODEL', 'gpt-4o'),
+        'timeout' => (int) env('CENCORI_TIMEOUT', 20),
+    ],
+
 ];

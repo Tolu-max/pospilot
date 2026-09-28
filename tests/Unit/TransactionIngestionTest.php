@@ -57,6 +57,129 @@ class TransactionIngestionTest extends TestCase
         $this->assertSame(1, Transaction::count());
     }
 
+    public function test_statement_fee_enriches_a_matching_api_record_with_source_provenance(): void
+    {
+        [$agent, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $apiData = $this->data($provider, 'api', ['provider_fee' => '0.00', 'provider_fee_supplied' => false]);
+        $original = $ingestion->ingest($agent, $apiData)['transaction'];
+
+        $statementData = $this->data($provider, 'statement', ['provider_fee' => '24.00', 'provider_fee_supplied' => true]);
+        $enriched = $ingestion->ingest($agent, $statementData);
+
+        $this->assertSame('duplicate', $enriched['status']);
+        $this->assertSame($original->id, $enriched['transaction']->id);
+        $this->assertSame('24.00', (string) $enriched['transaction']->fresh()->provider_fee);
+        $this->assertTrue($enriched['transaction']->fresh()->provider_fee_supplied);
+        $this->assertSame('provider_statement', $enriched['transaction']->fresh()->metadata['provider_fee_provenance']);
+        $this->assertSame(1, Transaction::count());
+        $this->assertSame(2, $enriched['transaction']->sourceRecords()->count());
+        $this->assertDatabaseHas('transaction_source_records', ['transaction_id' => $original->id, 'source_type' => 'provider_api']);
+        $this->assertDatabaseHas('transaction_source_records', ['transaction_id' => $original->id, 'source_type' => 'provider_statement']);
+    }
+
+    public function test_higher_priority_api_fee_replaces_statement_fee_and_keeps_audit_history(): void
+    {
+        [$agent, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $statement = $this->data($provider, 'statement', ['provider_fee' => '30.00', 'provider_fee_supplied' => true]);
+        $transaction = $ingestion->ingest($agent, $statement)['transaction'];
+        $api = $this->data($provider, 'api', ['provider_fee' => '24.00', 'provider_fee_supplied' => true]);
+
+        $result = $ingestion->ingest($agent, $api);
+        $transaction->refresh();
+
+        $this->assertSame('duplicate', $result['status']);
+        $this->assertSame('24.00', (string) $transaction->provider_fee);
+        $this->assertSame('provider_api', $transaction->metadata['provider_fee_provenance']);
+        $this->assertSame('30.00', $transaction->metadata['provider_fee_history'][0]['amount']);
+        $this->assertSame('provider_statement', $transaction->metadata['provider_fee_history'][0]['source']);
+    }
+
+    public function test_rrn_can_deduplicate_api_and_statement_records_with_different_display_references(): void
+    {
+        [$agent, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $api = $this->data($provider, 'api', ['external_reference' => 'OPAY-PAY-1', 'metadata' => ['rrn' => 'RRN-1']]);
+        $statement = $this->data($provider, 'statement', ['external_reference' => 'STATEMENT-ROW-1', 'metadata' => ['rrn' => 'RRN-1']]);
+        $original = $ingestion->ingest($agent, $api)['transaction'];
+
+        $duplicate = $ingestion->ingest($agent, $statement);
+
+        $this->assertSame('duplicate', $duplicate['status']);
+        $this->assertSame($original->id, $duplicate['transaction']->id);
+        $this->assertSame(1, Transaction::count());
+        $this->assertSame(2, $duplicate['transaction']->sourceRecords()->count());
+    }
+
+    public function test_source_references_are_hashed_and_repeat_sync_reuses_the_source_record(): void
+    {
+        [$agent, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $data = $this->data($provider, 'api', [
+            'external_reference' => 'PRIVATE-PROVIDER-REFERENCE-78231',
+            'metadata' => ['source_reference' => 'PRIVATE-SOURCE-EVENT-78231', 'rrn' => 'RRN-PRIVATE-78231'],
+        ]);
+        $transaction = $ingestion->ingest($agent, $data)['transaction'];
+
+        $ingestion->ingest($agent, $data);
+        $sourceRecord = $transaction->sourceRecords()->sole();
+
+        $this->assertNotSame('PRIVATE-SOURCE-EVENT-78231', $sourceRecord->source_reference_fingerprint);
+        $this->assertNotSame('RRN-PRIVATE-78231', $sourceRecord->metadata_fingerprint);
+        $this->assertSame('provider_api', $sourceRecord->source_type);
+        $this->assertSame(1, $transaction->sourceRecords()->count());
+    }
+
+    public function test_fallback_fingerprint_ignores_fee_but_scopes_by_business_and_terminal(): void
+    {
+        [, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $first = $this->data($provider, 'api', [
+            'external_reference' => null,
+            'terminal_identifier' => 'TERM-1',
+            'provider_fee' => '0.00',
+            'provider_fee_supplied' => false,
+            'metadata' => ['business_id' => 'BUSINESS-1'],
+        ]);
+        $sameTransactionWithFee = $this->data($provider, 'statement', [
+            'external_reference' => null,
+            'terminal_identifier' => 'TERM-1',
+            'provider_fee' => '24.00',
+            'provider_fee_supplied' => true,
+            'metadata' => ['business_id' => 'BUSINESS-1'],
+        ]);
+        $differentTerminal = $this->data($provider, 'api', [
+            'external_reference' => null,
+            'terminal_identifier' => 'TERM-2',
+            'metadata' => ['business_id' => 'BUSINESS-1'],
+        ]);
+
+        $this->assertSame($ingestion->fingerprint($first), $ingestion->fingerprint($sameTransactionWithFee));
+        $this->assertNotSame($ingestion->fingerprint($first), $ingestion->fingerprint($differentTerminal));
+    }
+
+    public function test_fallback_identity_without_terminal_or_account_context_does_not_merge_sources(): void
+    {
+        [$agent, $provider] = $this->setupAgent();
+        $ingestion = new TransactionIngestionService(new ChargeCalculationService);
+        $api = $this->data($provider, 'api', [
+            'external_reference' => null,
+            'terminal_identifier' => null,
+            'metadata' => ['source_reference' => 'api-observation-1'],
+        ]);
+        $statement = $this->data($provider, 'statement', [
+            'external_reference' => null,
+            'terminal_identifier' => null,
+            'metadata' => ['source_reference' => 'statement-attachment-1'],
+        ]);
+
+        $this->assertNotSame($ingestion->fingerprint($api), $ingestion->fingerprint($statement));
+        $this->assertSame('imported', $ingestion->ingest($agent, $api)['status']);
+        $this->assertSame('imported', $ingestion->ingest($agent, $statement)['status']);
+        $this->assertSame(2, Transaction::count());
+    }
+
     public function test_ingestion_preserves_metadata_and_calculates_missing_charge(): void
     {
         [$agent, $provider] = $this->setupAgent();

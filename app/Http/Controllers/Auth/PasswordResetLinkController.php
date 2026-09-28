@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
@@ -26,13 +27,16 @@ class PasswordResetLinkController extends Controller
      *
      * @throws ValidationException
      */
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, TransactionalEmailDelivery $delivery): RedirectResponse
     {
         $request->validate([
             'email' => 'required|email',
         ]);
 
-        Password::sendResetLink($request->only('email'));
+        $delivery->send(
+            fn () => Password::sendResetLink($request->only('email')),
+            'password_reset',
+        );
 
         return back()->with('status', 'If an account with that email exists, a password reset link has been sent.');
     }

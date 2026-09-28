@@ -80,7 +80,7 @@ final class DailyClosingController extends Controller
     {
         abort_unless($request->user()?->agentProfile, 404);
 
-        return $request->user()->agentProfile;
+        return $request->user()->businessAgentProfile();
     }
 
     private function date(Request $request): CarbonImmutable

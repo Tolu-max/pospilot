@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Notifications\SecurityAlertNotification;
 use App\Services\AccountSessionService;
 use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -17,8 +19,12 @@ class PasswordController extends Controller
     /**
      * Update the user's password.
      */
-    public function update(Request $request, AccountSessionService $sessions, SecurityEventRecorder $events): RedirectResponse
-    {
+    public function update(
+        Request $request,
+        AccountSessionService $sessions,
+        SecurityEventRecorder $events,
+        TransactionalEmailDelivery $delivery,
+    ): RedirectResponse {
         $validated = $request->validate([
             'current_password' => ['required', 'current_password'],
             'password' => ['required', Password::defaults(), 'confirmed'],
@@ -38,6 +44,14 @@ class PasswordController extends Controller
         $request->session()->regenerate();
         $request->session()->passwordConfirmed();
         $events->record($request->user(), 'password_changed', $request, ['method' => 'password']);
+        $delivery->send(
+            fn () => $request->user()->notify(new SecurityAlertNotification(
+                'Your password was changed',
+                'The password for your POSPilot account was changed. If you did not make this change, sign in and secure your account.',
+                'For your security, this email does not include account or transaction details.',
+            )),
+            'password_changed',
+        );
 
         return back();
     }

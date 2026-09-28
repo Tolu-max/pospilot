@@ -3,12 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Notifications\SecurityAlertNotification;
 use App\Services\AccountSessionService;
 use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Redirect;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -29,10 +32,14 @@ class ProfileController extends Controller
     /**
      * Update the user's profile information.
      */
-    public function update(ProfileUpdateRequest $request, SecurityEventRecorder $events): RedirectResponse
-    {
+    public function update(
+        ProfileUpdateRequest $request,
+        SecurityEventRecorder $events,
+        TransactionalEmailDelivery $delivery,
+    ): RedirectResponse {
         $user = $request->user();
-        $emailChanged = $user->email !== $request->validated('email');
+        $previousEmail = $user->email;
+        $emailChanged = $previousEmail !== $request->validated('email');
         $user->fill($request->validated());
 
         if ($user->isDirty('email')) {
@@ -42,7 +49,18 @@ class ProfileController extends Controller
         $user->save();
 
         if ($emailChanged) {
-            $user->sendEmailVerificationNotification();
+            $delivery->send(
+                fn () => $user->sendEmailVerificationNotification(),
+                'email_verification',
+            );
+            $delivery->send(
+                fn () => Notification::route('mail', $previousEmail)->notify(new SecurityAlertNotification(
+                    'Your POSPilot email address changed',
+                    'The email address on your POSPilot account was changed. If you did not make this change, sign in and secure your account.',
+                    'For your security, this email does not include account or transaction details.',
+                )),
+                'email_changed',
+            );
             $events->record($user, 'email_changed', $request, ['method' => 'password']);
         }
 

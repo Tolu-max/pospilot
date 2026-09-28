@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\CustomerChargeSource;
+use App\Enums\OnboardingState;
 use App\Models\Transaction;
 use App\Services\EarningsService;
 use Brick\Math\BigDecimal;
@@ -15,8 +16,10 @@ class TransactionController extends Controller
 {
     public function index(Request $request, EarningsService $earnings)
     {
-        $agent = $request->user()->agentProfile;
-        abort_unless($agent, 404, 'Agent profile not found.');
+        $agent = $request->user()->businessAgentProfile();
+        if ($agent === null || $agent->onboarding_state !== OnboardingState::Completed) {
+            return redirect('/dashboard');
+        }
         $filters = $request->validate(['provider_id' => 'nullable|integer', 'status' => 'nullable|in:successful,pending,failed,reversed', 'from' => 'nullable|date', 'to' => 'nullable|date', 'search' => 'nullable|string|max:100']);
         $query = $agent->transactions()->with(['provider', 'terminal', 'importBatch', 'adjustments'])->latest('transaction_at');
         $query->when($filters['provider_id'] ?? null, fn ($query, $value) => $query->where('provider_id', $value));
@@ -32,7 +35,7 @@ class TransactionController extends Controller
             return $transaction;
         });
 
-        return Inertia::render('Transactions/Index', ['transactions' => $transactions, 'providers' => $agent->providers()->orderBy('name')->get(['providers.id', 'providers.name']), 'filters' => $filters, 'importBatches' => $agent->importBatches()->with('provider')->latest()->limit(10)->get()]);
+        return Inertia::render('Transactions/Index', ['transactions' => $transactions, 'providers' => $agent->providers()->orderBy('providers.name')->get(['providers.id', 'providers.name']), 'filters' => $filters, 'importBatches' => $agent->importBatches()->with('provider')->latest()->limit(10)->get()]);
     }
 
     public function show(Request $request, Transaction $transaction, EarningsService $earnings)

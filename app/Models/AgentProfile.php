@@ -13,16 +13,31 @@ class AgentProfile extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'business_name', 'phone', 'country', 'currency', 'location', 'onboarding_state'];
+    protected $fillable = ['user_id', 'business_name', 'phone', 'country', 'currency', 'location', 'onboarding_state', 'selected_provider_slugs', 'statement_sender_rules'];
 
     protected function casts(): array
     {
-        return ['onboarding_state' => OnboardingState::class];
+        return ['onboarding_state' => OnboardingState::class, 'selected_provider_slugs' => 'array', 'statement_sender_rules' => 'array'];
     }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function memberships(): HasMany
+    {
+        return $this->hasMany(BusinessMembership::class);
+    }
+
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(BusinessInvitation::class);
+    }
+
+    public function shifts(): HasMany
+    {
+        return $this->hasMany(BusinessShift::class);
     }
 
     public function providers(): HasManyThrough

@@ -24,6 +24,41 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasOne(AgentProfile::class);
     }
 
+    public function teamMembership(): HasOne
+    {
+        return $this->hasOne(BusinessMembership::class);
+    }
+
+    public function businessAgentProfile(): ?AgentProfile
+    {
+        $ownedProfile = $this->agentProfile;
+        if ($ownedProfile !== null) {
+            return $ownedProfile;
+        }
+
+        $membership = $this->teamMembership;
+        if ($membership === null || ! $membership->is_active) {
+            return null;
+        }
+
+        return $membership->agentProfile;
+    }
+
+    public function businessRole(): ?string
+    {
+        $agent = $this->businessAgentProfile();
+        if ($agent !== null && $agent->user_id === $this->id) {
+            return 'owner';
+        }
+
+        $membership = $this->teamMembership;
+        if ($membership !== null) {
+            return $membership->is_active ? $membership->role : null;
+        }
+
+        return 'owner';
+    }
+
     /** @return HasMany<SecurityEvent, $this> */
     public function securityEvents(): HasMany
     {

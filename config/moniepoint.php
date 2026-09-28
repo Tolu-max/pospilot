@@ -1,6 +1,6 @@
 <?php
 
 return [
-    // This endpoint is explicitly documented as the development key-introspection environment.
-    'introspection_url' => 'https://posapi.development.moniepoint.com/v1/introspect',
+    // Official Moniepoint POS API reference server; it reports the key environment.
+    'introspection_url' => env('MONIEPOINT_INTROSPECTION_URL', 'https://api.pos.beta.moniepoint.com/v1/introspect'),
 ];

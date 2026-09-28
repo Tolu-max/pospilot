@@ -12,6 +12,6 @@ class AgentProfileFactory extends Factory
 
     public function definition(): array
     {
-        return ['user_id' => User::factory(), 'business_name' => fake()->company(), 'phone' => fake()->numerify('080########'), 'country' => 'Nigeria', 'currency' => 'NGN', 'location' => fake()->city()];
+        return ['user_id' => User::factory(), 'business_name' => fake()->company(), 'phone' => fake()->numerify('080########'), 'country' => 'Nigeria', 'currency' => 'NGN', 'location' => fake()->city(), 'onboarding_state' => 'completed'];
     }
 }

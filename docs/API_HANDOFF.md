@@ -34,6 +34,8 @@ Provider finance routes are protected by `auth`, `auth.session`, and `verified`.
 
 ## Agent profile
 
+Onboarding note (frontend QA): a newly registered and email-verified user may not yet have an `AgentProfile`. Previously, `GET /dashboard` returned `404` in this state, leaving the user without an onboarding destination even though `PATCH /api/agent/profile` can create the profile. Also, a profile saved with `onboarding_state: in_progress` must resume onboarding if the user leaves before finishing. The dashboard renders the onboarding screen while the profile is absent or not completed; the profile API contract remains unchanged.
+
 | Method | Path | Request | Representative response |
 |---|---|---|---|
 | GET | `/api/agent/profile` | none | `{ "id": 1, "business_name": "Lagos Corner POS", "country": "Nigeria", "currency": "NGN", "onboarding_state": "completed" }` |
@@ -43,14 +45,14 @@ Provider finance routes are protected by `auth`, `auth.session`, and `verified`.
 
 | Method | Path | Request | Representative response |
 |---|---|---|---|
-| GET | `/api/providers` | none | `{ "data": [{ "id": 1, "name": "OPay", "slug": "opay", "capabilities": { "csv_transaction_import": "supported", "api_transaction_sync": "planned" } }] }` |
+| GET | `/api/providers` | none | `{ "data": [{ "id": 1, "name": "OPay", "slug": "opay", "capabilities": { "direct_connection": "requires_provider_access", "connector_implementation": "planned", "api_transaction_sync": "documented" } }] }` |
 | GET | `/api/provider-connections` | none | Returns the user's connections with provider, `connection_state`, `last_synced_at`, `last_imported_at`, sync status, and configured terminal count. Credentials are never returned. |
 
-Connection states are `csv_only`, `manual`, `demo`, `connected`, and `sync_error`. Moniepoint has a separate connection status API below. Its webhook path is implemented from the provider's published signature guide; transaction-history sync remains planned.
+Connection states are `csv_only`, `manual`, `demo`, `connected`, and `sync_error`. Moniepoint has a separate connection status API below. Its API-key introspection test exists; webhook ingestion is disabled because the current official reference does not verify the callback authentication and payload contract, and existing-terminal history sync is not documented.
 
 ### Moniepoint connection
 
-All four routes below require the authenticated, email-verified Laravel web session. State-changing routes use CSRF protection. Credential update, connection test, and disconnect additionally require recent authentication (`password.confirm`; JSON returns `423` when stale). API key and webhook secret are accepted only on update and are never returned or flashed back as old input. Connection test currently targets Moniepoint's documented development introspection host.
+All four routes below require the authenticated, email-verified Laravel web session. State-changing routes use CSRF protection. Credential update, connection test, and disconnect additionally require recent authentication (`password.confirm`; JSON returns `423` when stale). The API key is accepted only on update and is never returned or flashed back as old input. Connection test currently targets Moniepoint's documented development introspection host.
 
 | Method | Path | Request | Response/status |
 |---|---|---|---|
@@ -101,7 +103,9 @@ Successful transactions alone contribute to earnings. Failed, pending, and rever
 
 `financial_status` on transaction responses has this shape: `{ "financial_data_status": "provisional", "earnings_status": "provisional", "is_final": false, "reasons": ["provider_fee_missing"], "customer_charge_source": "calculated", "provider_fee_supplied": false, "provider_fee_components_complete": false, "is_calculated": true, "is_manually_overridden": false }`. `financial_data_status` distinguishes `complete_verified`, `provisional`, `calculated`, and `manually_overridden`; `earnings_status` independently says `final` or `provisional`. Calculated charges from configured POSPilot charge rules and deliberate manual overrides are surfaced as provenance, not confused with missing provider deductions. A numeric `provider_fee` of `0.00` is not evidence of a zero fee when `provider_fee_supplied` is false. When a scalar fee exists without a verified complete fee-component breakdown, the reason is `provider_fee_components_incomplete`; both provisional conditions aggregate to `earnings_status: provisional`.
 
-## Imports
+## Imports (internal QA/recovery only)
+
+The QA page and preview/confirm upload routes are retained for internal tooling but return `404` outside `local` and `testing`; they are not part of the production agent workflow. Gmail statement discovery and import routes are implemented behind the Gmail feature flag; production OAuth, secure token-store configuration, and real-mailbox verification remain deployment prerequisites. See [GMAIL_STATEMENT_INTEGRATION.md](GMAIL_STATEMENT_INTEGRATION.md).
 
 | Method | Path | Request | Response/status |
 |---|---|---|---|
@@ -161,4 +165,27 @@ Closing status is recalculated server-side. Finalized closings cannot be edited.
 
 Finalization requires an entered closing-cash value whenever expected cash can be calculated, and an actual provider balance for every provider with successful activity that day. A provider-level snapshot satisfies the provider requirement; otherwise, all active transaction terminals for that provider need terminal-level snapshots. Expected electronic position continues to include all successful transactions while actual balances are incomplete, and the close remains unresolved until required actuals are supplied.
 
+## Gmail statement beta
+
+Gmail routes are behind authenticated, verified sessions and `FEATURE_GMAIL_STATEMENTS`. Dedicated Gmail OAuth is separate from normal Google sign-in. The OAuth start/callback use `GET /integrations/gmail/connect` and `GET /integrations/gmail/callback`; the exact production callback is `https://pospilot.tconnect.com.ng/integrations/gmail/callback`. Scope is the restricted `https://www.googleapis.com/auth/gmail.readonly`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/gmail/connection` | Safe connection status and statement counts; no tokens or message identifiers. |
+| PUT | `/api/gmail/connection/rules` | Save selected provider slugs and exact sender email rules. |
+| POST | `/integrations/gmail/sync` | Bounded synchronous manual statement discovery; response reports candidate and statement counts. |
+| GET | `/api/gmail/statements` | List safe statement status and headers for first-time mapping. |
+| POST | `/api/gmail/statements/{message}/mapping` | Save a schema mapping for an owned statement and selected owned terminal. |
+| DELETE | `/integrations/gmail` | Revoke best-effort, delete local tokens/temp files, and mark disconnected. |
+
+See [Gmail statement integration](GMAIL_STATEMENT_INTEGRATION.md) and [Google Cloud setup](GMAIL_GOOGLE_CLOUD_SETUP.md) for consent, privacy, testing mode, supported formats, and production gates. Real provider statement schemas remain unverified until checked against real provider-issued spreadsheets. Google restricted-scope production verification is not complete.
+
 For internal integration QA only, authenticated users can visit `/qa/integration`. It is an isolated throwaway page and is not part of the production frontend contract. The fictional cross-system arithmetic is frozen in `docs/QA_SCENARIO.md`; the Postman collection and local environment are under `docs/postman/`.
+
+## Direct POS provider integrations
+
+`GET /api/providers` returns the central provider capability states from `config/pospilot.php`. Treat `documented`, `planned`, `requires_provider_access`, `unverified`, `unsupported`, and `coming_later` as distinct states. A documented API is not an implemented connector or a live-tested connection. OPay TN historical query and Moniepoint webhook events are not enabled as production integrations by this application. See [provider research](providers/DIRECT_PROVIDER_RESEARCH.md).
+
+All imports/direct sources must use `NormalizedTransactionData` and `TransactionIngestionService`. The service prioritizes documented provider transaction IDs, RRN, provider order references, then normalized references. Fallback identity includes provider, business/account fingerprint, terminal, type, amount, and exact timestamp (not fee). If no stable terminal identifier exists, the source and source reference also scope the fallback, preventing unsafe cross-source merges based only on amount/time. Connectors should normalize stable references and terminal identifiers whenever available.
+
+Every ingestion observation creates or reuses an audit-safe `transaction_source_records` row containing only source type, a hash of its reference, a hash of selected safe metadata, and observation time. It does not retain raw email IDs, customer details, or provider payloads. A later more-authoritative source may replace a supplied provider fee only after the shared transaction identity matched; the prior fee/source/time are retained in `metadata.provider_fee_history`. Missing fees remain unknown and earnings remain provisional. Source priority values live in `config/pospilot.php` in this order: `provider_api`, `provider_webhook`, `provider_statement`, `calculated`, `manual`. Priority never replaces fields automatically; enrichment is field-specific and must preserve audit history.

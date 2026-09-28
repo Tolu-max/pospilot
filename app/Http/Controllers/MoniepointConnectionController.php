@@ -20,6 +20,7 @@ final class MoniepointConnectionController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
+        $this->ensureEnabled();
         $agent = $this->agent($request);
         $connection = $this->connection($agent);
 
@@ -28,9 +29,9 @@ final class MoniepointConnectionController extends Controller
 
     public function store(Request $request, ProviderSecretStore $secrets, SecurityEventRecorder $events): JsonResponse
     {
+        $this->ensureEnabled();
         $validated = $request->validate([
             'api_key' => ['required', 'string', 'max:4096'],
-            'webhook_secret' => ['required', 'string', 'max:4096'],
             'business_id' => ['required', 'string', 'max:100', 'regex:/^[0-9]+$/'],
         ]);
         $agent = $this->agent($request);
@@ -49,7 +50,7 @@ final class MoniepointConnectionController extends Controller
                     'last_sync_error' => null,
                 ]);
                 $connection->save();
-                $secretValues = ['api_key' => $validated['api_key'], 'webhook_secret' => $validated['webhook_secret']];
+                $secretValues = ['api_key' => $validated['api_key']];
 
                 if ($existing && $connection->secret_reference !== null) {
                     $secrets->rotate($connection, $secretValues);
@@ -69,11 +70,12 @@ final class MoniepointConnectionController extends Controller
         ]);
         $events->record($request->user(), 'provider_credentials_updated', $request, ['provider' => 'moniepoint']);
 
-        return response()->json($this->safeStatus($agent, $connection), $existing ? 200 : 201);
+        return response()->json($this->safeStatus($agent, $connection->refresh()), $existing ? 200 : 201);
     }
 
     public function test(Request $request, MoniepointConnectionService $service, SecurityEventRecorder $events): JsonResponse
     {
+        $this->ensureEnabled();
         $agent = $this->agent($request);
         $connection = $this->connection($agent);
 
@@ -94,6 +96,7 @@ final class MoniepointConnectionController extends Controller
 
     public function destroy(Request $request, ProviderSecretStore $secrets, SecurityEventRecorder $events): JsonResponse
     {
+        $this->ensureEnabled();
         $agent = $this->agent($request);
         $connection = $this->connection($agent);
 
@@ -141,13 +144,22 @@ final class MoniepointConnectionController extends Controller
         $provider = Provider::query()->where('slug', 'moniepoint')->first();
 
         return [
+            'configured' => is_string($connection?->secret_reference) && $connection->secret_reference !== '',
             'connected' => $connection?->connection_status === ProviderConnectionStatus::Active,
             'connection_type' => $connection?->connection_type?->value,
             'status' => $connection?->last_sync_status ?? 'not_connected',
             'error' => $connection?->last_sync_error,
             'last_synced_at' => $connection?->last_synced_at,
+            'environment' => $connection?->metadata['moniepoint_introspection']['environment'] ?? null,
+            'business_name' => $connection?->metadata['moniepoint_introspection']['business_name'] ?? null,
+            'granted_scopes' => $connection?->metadata['moniepoint_introspection']['granted_scopes'] ?? [],
             'last_webhook_at' => $connection?->last_webhook_at,
             'terminal_count' => $provider ? $agent->terminals()->where('provider_id', $provider->id)->count() : 0,
         ];
+    }
+
+    private function ensureEnabled(): void
+    {
+        abort_unless(config('provider_secrets.moniepoint_direct_enabled'), 404);
     }
 }

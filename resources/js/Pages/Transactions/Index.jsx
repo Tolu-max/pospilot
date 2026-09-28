@@ -1,9 +1,113 @@
-import { Link } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
+import { Link, router, usePage } from '@inertiajs/react';
 import AppShell from '../../Layouts/AppShell';
+import { api, dateTime, money } from '../../lib/api';
+import ProviderLogo from '../../Components/ProviderLogo';
 
-const money = (value) => `₦${String(value ?? '0.00')}`;
-const badge = (status) => status === 'successful' || status === 'settled' ? 'bg-emerald-50 text-emerald-700' : status === 'failed' || status === 'reversed' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700';
+const statuses = ['successful', 'pending', 'failed', 'reversed'];
+const settlementStatuses = ['pending', 'settled', 'unreconciled', 'disputed'];
+const defaultFilters = () => {
+    const query = new URLSearchParams(window.location.search);
+    return { provider_id: query.get('provider_id') || '', terminal_id: query.get('terminal_id') || '', transaction_status: query.get('transaction_status') || query.get('status') || '', settlement_status: query.get('settlement_status') || '', from: query.get('from') || '', to: query.get('to') || '', reference: query.get('reference') || query.get('search') || '' };
+};
+const label = (value) => String(value || 'Not recorded').replaceAll('_', ' ');
+const terminalLabel = (providerName, terminalName) => {
+    const terminal = String(terminalName || '').trim();
+    const provider = String(providerName || '').trim();
+    const displayName = provider && terminal.toLowerCase().startsWith(provider.toLowerCase())
+        ? terminal.slice(provider.length).trim()
+        : terminal;
 
-export default function Index({ transactions, providers, filters = {}, importBatches = [] }) {
-    return <AppShell title="Transactions"><div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-600">Normalized records from your providers.</p><Link href="/transactions/import" className="inline-flex min-h-11 items-center justify-center rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2">Import CSV</Link></div><form method="get" action="/transactions" className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-5"><label className="text-sm font-medium text-slate-700">Provider<select name="provider_id" defaultValue={filters.provider_id || ''} className="mt-1 min-h-11 w-full rounded-md border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600"><option value="">All providers</option>{providers.map((provider)=><option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Status<select name="status" defaultValue={filters.status || ''} className="mt-1 min-h-11 w-full rounded-md border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600"><option value="">All statuses</option><option value="successful">Successful</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="reversed">Reversed</option></select></label><label className="text-sm font-medium text-slate-700">From<input type="date" name="from" defaultValue={filters.from || ''} className="mt-1 min-h-11 w-full rounded-md border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600" /></label><label className="text-sm font-medium text-slate-700">To<input type="date" name="to" defaultValue={filters.to || ''} className="mt-1 min-h-11 w-full rounded-md border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600" /></label><label className="text-sm font-medium text-slate-700">Reference<input type="search" name="search" defaultValue={filters.search || ''} placeholder="Search reference" className="mt-1 min-h-11 w-full rounded-md border-slate-300 text-sm focus:border-emerald-600 focus:ring-emerald-600" /></label><button type="submit" className="min-h-11 rounded-md border border-slate-300 px-4 text-sm font-semibold hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 sm:col-start-5">Apply filters</button></form><div className="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-white">{transactions.data?.length ? <div className="divide-y divide-slate-100">{transactions.data.map((transaction)=><Link key={transaction.id} href={`/transactions/${transaction.id}`} className="block p-4 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{money(transaction.amount)}</span><span className={`rounded-full px-2 py-1 text-xs font-semibold ${badge(transaction.transaction_status)}`}>{transaction.transaction_status}</span></div><p className="mt-1 text-sm text-slate-600">{transaction.provider?.name} · {transaction.external_reference || 'No reference'}</p><p className="mt-1 text-xs text-slate-500">{new Date(transaction.transaction_at).toLocaleString('en-NG')} {transaction.terminal ? `· ${transaction.terminal.name}` : ''}</p></div><div className="text-right text-sm"><p className="font-semibold text-emerald-700">+{money(transaction.estimated_earnings)}</p><p className="mt-1 text-xs text-slate-500">Charge {money(transaction.customer_charge)}</p><p className="text-xs text-slate-500">Fee {money(transaction.provider_fee)}</p></div></div></Link>)}</div> : <div className="p-10 text-center"><p className="font-semibold">No transactions found</p><p className="mt-1 text-sm text-slate-500">Adjust the filters or import a provider statement.</p><Link href="/transactions/import" className="mt-4 inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 text-sm font-semibold hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600">Import a CSV</Link></div>}</div><div className="mt-4 flex flex-wrap gap-2">{transactions.links?.map((link, index)=><a key={index} href={link.url || '#'} aria-disabled={!link.url} className={`min-h-10 rounded-md border px-3 py-2 text-sm ${link.active ? 'border-emerald-700 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`} dangerouslySetInnerHTML={{ __html: link.label }} />)}</div>{importBatches.length > 0 && <section className="mt-8"><h2 className="font-semibold">Recent imports</h2><div className="mt-3 grid gap-3 sm:grid-cols-2">{importBatches.map((batch)=><div key={batch.id} className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex justify-between gap-3"><p className="truncate text-sm font-medium">{batch.filename}</p><span className="text-xs text-slate-500">{batch.provider?.name}</span></div><p className="mt-2 text-sm text-slate-600">{batch.rows_imported} imported · {batch.rows_duplicate} duplicates · {batch.rows_failed} failed</p></div>)}</div></section>}</AppShell>;
+    return displayName || terminal || 'Terminal not recorded';
+};
+
+export default function Index() {
+    const { url } = usePage();
+    const [filters, setFilters] = useState(defaultFilters);
+    const [result, setResult] = useState(null);
+    const [providers, setProviders] = useState([]);
+    const [terminals, setTerminals] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => { setFilters(defaultFilters()); }, [url]);
+    useEffect(() => {
+        let active = true;
+        setLoading(true);
+        setError(null);
+        const query = new URLSearchParams(window.location.search);
+        const requested = defaultFilters();
+        Object.entries(requested).forEach(([key, value]) => { if (value) query.set(key, value); else query.delete(key); });
+        if (!query.has('per_page')) query.set('per_page', '20');
+        Promise.all([api('/api/providers'), api('/api/terminals'), api(`/api/transactions?${query.toString()}`)])
+            .then(([providerList, terminalList, transactions]) => {
+                if (!active) return;
+                setProviders(providerList.data || []);
+                setTerminals(terminalList.data || []);
+                setResult(transactions);
+            })
+            .catch((requestError) => active && setError(requestError))
+            .finally(() => active && setLoading(false));
+        return () => { active = false; };
+    }, [url]);
+
+    function submit(event) {
+        event.preventDefault();
+        const values = Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== ''));
+        router.get('/transactions', { ...values, per_page: 20 }, { preserveScroll: true });
+    }
+
+    function update(key, value) {
+        setFilters((current) => ({ ...current, [key]: value }));
+    }
+
+    const rows = result?.data || [];
+    const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
+    return <AppShell title="Transactions"><div className="transactions-page">
+        <div className="transactions-heading"><div><span className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS ACTIVITY</span><h1>Transactions</h1><p>Review your POS activity and the earnings recorded for each transaction.</p></div></div>
+        <form onSubmit={submit} className="transactions-filter-bar" aria-label="Transaction filters">
+            <label className="tx-filter-select"><span>Provider</span><select name="provider_id" value={filters.provider_id} onChange={(event) => update('provider_id', event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+            <label className="tx-filter-select"><span>Terminal</span><select name="terminal_id" value={filters.terminal_id} onChange={(event) => update('terminal_id', event.target.value)}><option value="">All terminals</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}</select></label>
+            <label className="tx-filter-select"><span>Transaction status</span><select name="transaction_status" value={filters.transaction_status} onChange={(event) => update('transaction_status', event.target.value)}><option value="">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+            <label className="tx-filter-select"><span>Settlement status</span><select name="settlement_status" value={filters.settlement_status} onChange={(event) => update('settlement_status', event.target.value)}><option value="">All settlement states</option>{settlementStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+            <label className="tx-filter-select tx-filter-date"><span>From</span><input type="date" name="from" value={filters.from} onChange={(event) => update('from', event.target.value)} /></label>
+            <label className="tx-filter-select tx-filter-date"><span>To</span><input type="date" name="to" value={filters.to} onChange={(event) => update('to', event.target.value)} /></label>
+            <label className="tx-filter-search"><span>Reference</span><input type="search" name="reference" value={filters.reference} placeholder="Search a reference" onChange={(event) => update('reference', event.target.value)} /></label>
+            <div className="transaction-filter-actions"><button className="tx-action-button tx-action-button-primary" type="submit">Apply filters</button><Link className="tx-action-button" href="/transactions">Clear{activeFilterCount ? ` (${activeFilterCount})` : ''}</Link></div>
+        </form>
+
+        {error && <div className="tx-error" role="alert"><strong>Transactions could not be loaded.</strong><span>{error.message}</span><button type="button" onClick={() => window.location.reload()}>Try again</button></div>}
+        <div className="transactions-count-row"><div className="transactions-count">{result?.total ?? '—'} transactions<span>{result ? ` · Page ${result.current_page} of ${result.last_page}` : ''}</span></div><span className="tx-detail-label">Newest first</span></div>
+        <section className="transactions-list-panel" aria-label="Transaction list" aria-busy={loading}>
+            {loading ? <div className="tx-loading" role="status" aria-label="Loading transactions"><div className="tx-skeleton" /><div className="tx-skeleton" /><div className="tx-skeleton" /><p>Loading your transactions…</p></div> : rows.length === 0 ? <div className="tx-empty"><div><h3>{activeFilterCount ? 'No matching transactions' : 'No transactions yet'}</h3><p>{activeFilterCount ? 'Try a wider date range or remove one or more filters.' : 'When POSPilot receives supported provider activity, it will appear here.'}</p>{activeFilterCount > 0 && <Link href="/transactions" className="tx-action-button">Clear filters</Link>}</div></div> : <>
+                <div className="tx-table-scroll"><table className="tx-table"><thead><tr><th>Date &amp; time</th><th>Provider / terminal</th><th>Reference</th><th>Amount</th><th>Earnings</th><th>Status</th><th>Action</th></tr></thead><tbody>
+                    {rows.map((transaction) => <tr key={transaction.id} className="tx-row">
+                        <td data-label="Date & time"><span className="tx-date-cell">{dateTime(transaction.transaction_at)}</span></td>
+                        <td data-label="Provider / terminal"><span className="provider-cell compact"><ProviderLogo provider={transaction.provider} size="md" /><span><strong>{transaction.provider?.name || 'Provider'}</strong><small>{terminalLabel(transaction.provider?.name, transaction.terminal?.name)}</small></span></span></td>
+                        <td data-label="Reference" className="reference-cell">{transaction.external_reference || 'Not supplied'}</td>
+                        <td data-label="Amount" className="tx-principal">{money(transaction.amount)}</td>
+                        <td data-label="Earnings" className="tx-earnings"><strong>{money(transaction.estimated_earnings)}</strong>{transaction.financial_status?.is_final === false && <small>Provisional</small>}</td>
+                        <td data-label="Status"><StatusBadge status={transaction.transaction_status} /></td>
+                        <td data-label="Action" className="tx-row-link"><Link href={`/transactions/${transaction.id}`} aria-label={`View transaction ${transaction.external_reference || transaction.id}`}>View <span aria-hidden="true">→</span></Link></td>
+                    </tr>)}
+                </tbody></table></div>
+                <div className="tx-pagination"><span>Showing {rows.length} of {result.total} transactions</span><div className="tx-pagination-buttons">{result.prev_page_url && <PageLink url={result.prev_page_url} filters={filters}>Previous</PageLink>}<span>Page {result.current_page} / {result.last_page}</span>{result.next_page_url && <PageLink url={result.next_page_url} filters={filters}>Next</PageLink>}</div></div>
+            </>}
+        </section>
+    </div></AppShell>;
+}
+
+function PageLink({ url, children, filters }) {
+    const page = new URL(url, window.location.origin).searchParams.get('page');
+    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''));
+    if (page) query.set('page', page);
+    query.set('per_page', '20');
+    return <Link href={`/transactions?${query.toString()}`} className="tx-action-button">{children}</Link>;
+}
+
+function StatusBadge({ status }) {
+    const normalized = String(status || 'unknown').toLowerCase();
+    const tone = normalized === 'successful' ? 'status-success' : normalized === 'pending' ? 'status-pending' : normalized === 'reversed' ? 'status-reversed' : 'status-failed';
+    return <span className={`status-badge ${tone}`}><span />{label(normalized)}</span>;
 }

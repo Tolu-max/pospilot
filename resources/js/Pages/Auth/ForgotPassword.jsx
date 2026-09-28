@@ -1,55 +1,9 @@
-import InputError from '@/Components/InputError';
-import PrimaryButton from '@/Components/PrimaryButton';
-import TextInput from '@/Components/TextInput';
-import GuestLayout from '@/Layouts/GuestLayout';
-import { Head, useForm } from '@inertiajs/react';
+import GuestLayout from '../../Layouts/GuestLayout';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Button, Field, Notice } from '../../Components/PosPilotUI';
 
 export default function ForgotPassword({ status }) {
-    const { data, setData, post, processing, errors } = useForm({
-        email: '',
-    });
-
-    const submit = (e) => {
-        e.preventDefault();
-
-        post(route('password.email'));
-    };
-
-    return (
-        <GuestLayout>
-            <Head title="Forgot Password" />
-
-            <div className="mb-4 text-sm text-gray-600">
-                Forgot your password? No problem. Just let us know your email
-                address and we will email you a password reset link that will
-                allow you to choose a new one.
-            </div>
-
-            {status && (
-                <div className="mb-4 text-sm font-medium text-green-600">
-                    {status}
-                </div>
-            )}
-
-            <form onSubmit={submit}>
-                <TextInput
-                    id="email"
-                    type="email"
-                    name="email"
-                    value={data.email}
-                    className="mt-1 block w-full"
-                    isFocused={true}
-                    onChange={(e) => setData('email', e.target.value)}
-                />
-
-                <InputError message={errors.email} className="mt-2" />
-
-                <div className="mt-4 flex items-center justify-end">
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Email Password Reset Link
-                    </PrimaryButton>
-                </div>
-            </form>
-        </GuestLayout>
-    );
+    const form = useForm({ email: '' });
+    function submit(event) { event.preventDefault(); form.post('/forgot-password'); }
+    return <GuestLayout><Head title="Reset password" /><h1 className="text-2xl font-black">Reset your password</h1><p className="mt-2 text-sm leading-6 text-slate-600">Enter the email address for your account. For privacy, the confirmation message is the same whether or not an account matches.</p>{status && <div className="mt-4"><Notice tone="success">{status}</Notice></div>}{form.errors.email && <div className="mt-4"><Notice tone="error">{form.errors.email}</Notice></div>}<form onSubmit={submit} className="mt-6 space-y-4"><Field label="Email address" name="email" type="email" autoComplete="email" value={form.data.email} onChange={(event) => form.setData('email', event.target.value)} error={form.errors.email} required autoFocus /><Button type="submit" className="w-full" disabled={form.processing}>{form.processing ? 'Sending…' : 'Send reset instructions'}</Button></form><p className="mt-4 text-center"><Link href="/login" className="min-h-11 inline-flex items-center font-bold text-brand-accent">Back to sign in</Link></p></GuestLayout>;
 }

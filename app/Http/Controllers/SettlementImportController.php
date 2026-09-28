@@ -13,7 +13,7 @@ final class SettlementImportController extends Controller
     public function preview(Request $request, SettlementCsvImportService $service)
     {
         $data = $request->validate(['provider_id' => ['required', 'integer', 'exists:providers,id'], 'file' => ['required', 'file', 'mimes:csv,txt', 'max:5120'], 'mapping' => ['sometimes', 'array']]);
-        $agent = $request->user()->agentProfile;
+        $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404);
         $provider = Provider::findOrFail($data['provider_id']);
 
@@ -37,7 +37,7 @@ final class SettlementImportController extends Controller
         $data = $request->validate(['preview_token' => ['required', 'string']]);
         $stored = session('settlement_imports.'.$data['preview_token']);
         abort_unless($stored && now()->lessThanOrEqualTo($stored['expires_at']), 422, 'This settlement preview has expired. Please upload the CSV again.');
-        $agent = $request->user()->agentProfile;
+        $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404);
 
         $result = $service->importPreview($agent, Provider::findOrFail($stored['provider_id']), $stored['filename'], $stored['preview']);

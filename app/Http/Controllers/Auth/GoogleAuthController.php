@@ -180,7 +180,11 @@ class GoogleAuthController extends Controller
 
         $events->record($user, 'login', $request, ['method' => 'google']);
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        return redirect()->intended(route('dashboard', absolute: false))
+            ->with('analytics_event', [
+                'name' => $created ? 'signup_completed' : 'login_completed',
+                'id' => (string) Str::uuid(),
+            ]);
     }
 
     private function reject(

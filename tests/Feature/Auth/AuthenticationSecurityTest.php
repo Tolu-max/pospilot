@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Models\AgentProfile;
 use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\SecurityEventRecorder;
@@ -203,6 +204,7 @@ class AuthenticationSecurityTest extends TestCase
     public function test_sensitive_provider_credential_changes_require_recent_authentication(): void
     {
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
 
         $this->actingAs($user)
             ->withHeader('Accept', 'application/json')
@@ -219,6 +221,7 @@ class AuthenticationSecurityTest extends TestCase
     {
         config(['session.driver' => 'database']);
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
         $otherUser = User::factory()->create();
 
         DB::table('sessions')->insert([
@@ -247,6 +250,7 @@ class AuthenticationSecurityTest extends TestCase
     {
         config(['session.driver' => 'database']);
         $user = User::factory()->create();
+        AgentProfile::factory()->create(['user_id' => $user->id]);
         $this->actingAs($user)->deleteJson('/api/security/sessions/others')->assertStatus(423);
     }
 

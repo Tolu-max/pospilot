@@ -51,4 +51,9 @@ class Transaction extends Model
     {
         return $this->hasMany(TransactionAdjustment::class);
     }
+
+    public function sourceRecords(): HasMany
+    {
+        return $this->hasMany(TransactionSourceRecord::class);
+    }
 }
