@@ -130,3 +130,11 @@
 - Verified HTTPS homepage and login responses, a real owner Google Sign-In session reaching onboarding, CSRF meta-token presence, and Chrome rendering at 390, 768, and 1440px with no horizontal overflow. Production onboarding remains unfinished, so authenticated Providers/dashboard workflows could not be tested. The current Chrome page showed no POSPilot JavaScript errors; warnings observed were from a browser extension.
 - Gmail was not connected or tested: production `FEATURE_GMAIL_STATEMENTS` is off; dedicated Gmail OAuth client ID/secret and a production credential-store class are absent. Normal Google Sign-In was tested separately. SendByte delivery was not tested because the production mailer is not SendByte and the SendByte API key is absent. Queue worker and scheduler were not enabled or verified.
 - Verification: 154 PHPUnit tests and 844 assertions passed; Vite build and Pint passed; Composer audit found no advisories; `git diff --check` passed. No provider credentials or real financial data were used.
+
+## 2026-09-28 - Go54 Gmail PDF sync release
+
+- Activated isolated release `20260928-gmailpdf` from commit `83b7570`; retained the prior active release and shared production `.env`/storage links. No local `.env`, vendor directory, tests, database, or real statement files were uploaded.
+- Installed production Composer dependencies in the release, including `smalot/pdfparser` 2.12.5. Applied the additive attachment-fingerprint migration and rebuilt Laravel config, route, and view caches.
+- Added DirectAdmin cron entries for Laravel's scheduler and a database queue worker (`--stop-when-empty`). Cron entries are present; scheduled/queued Gmail job completion has not yet been observed.
+- Verified production HTTPS root, login, and Vite manifest respond with HTTP 200. Every asset referenced by the live manifest returned HTTP 200. Chrome's current browser-control session rendered a blank page, so authenticated Providers and Gmail/PDF import flows were not browser-verified in this release.
+- Local verification before deployment: 161 PHPUnit tests and 862 assertions passed; Vite build, Pint, Composer audit, and `git diff --check` passed. Real PDF parsing/import results remain unverified; no real statement contents were placed in this log.
