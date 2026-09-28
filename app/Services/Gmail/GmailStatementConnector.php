@@ -311,9 +311,9 @@ final class GmailStatementConnector
         $handle = fopen('php://temp', 'w+b');
         fwrite($handle, $contents);
         rewind($handle);
-        fgetcsv($handle);
+        fgetcsv($handle, null, ',', '"', '');
         $identifiers = [];
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
             $identifier = strtolower(trim((string) ($row[$columnIndex] ?? '')));
             if ($identifier !== '') {
                 $identifiers[$identifier] = true;

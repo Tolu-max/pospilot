@@ -25,7 +25,7 @@ final class GmailStatementImportService
     public function inspect(string $contents): array
     {
         $handle = $this->csvHandle($contents);
-        $headers = fgetcsv($handle);
+        $headers = fgetcsv($handle, null, ',', '"', '');
         fclose($handle);
         if (! is_array($headers) || count($headers) < 2 || count($headers) > 100) {
             throw new RuntimeException('unsupported_schema');
@@ -60,9 +60,9 @@ final class GmailStatementImportService
         }
 
         $handle = $this->csvHandle($contents);
-        fgetcsv($handle);
+        fgetcsv($handle, null, ',', '"', '');
         $identifiers = [];
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
             $identifier = trim((string) ($row[$columnIndex] ?? ''));
             if ($identifier !== '') {
                 $identifiers[$identifier] = true;
@@ -96,7 +96,7 @@ final class GmailStatementImportService
         abort_unless($message->temporary_file_path, 422, 'This statement is no longer available. Wait for the next statement email.');
         $contents = Crypt::decryptString(Storage::disk('local')->get($message->temporary_file_path));
         $handle = $this->csvHandle($contents);
-        $headers = fgetcsv($handle);
+        $headers = fgetcsv($handle, null, ',', '"', '');
         if (! is_array($headers)) {
             fclose($handle);
             throw new RuntimeException('unsupported_schema');
@@ -124,7 +124,7 @@ final class GmailStatementImportService
         if (is_string($identityColumn) && $identityColumn !== '') {
             $columnIndex = array_search($identityColumn, $headers, true);
             $identifiers = [];
-            while (($row = fgetcsv($handle)) !== false) {
+            while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
                 $identifier = trim((string) ($row[$columnIndex] ?? ''));
                 if ($identifier !== '') {
                     $identifiers[$identifier] = true;
@@ -172,7 +172,7 @@ final class GmailStatementImportService
         }
         $contents = Crypt::decryptString(Storage::disk('local')->get($message->temporary_file_path));
         $handle = $this->csvHandle($contents);
-        $headers = fgetcsv($handle);
+        $headers = fgetcsv($handle, null, ',', '"', '');
         if (! is_array($headers)) {
             fclose($handle);
             $message->update(['status' => 'unsupported_schema', 'failure_code' => 'invalid_headers']);
@@ -183,7 +183,7 @@ final class GmailStatementImportService
         $importer = new GenericCsvImporter($profile->column_mapping);
         $rows = [];
         $rowNumber = 1;
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
             $rowNumber++;
             if ($rowNumber > 5001) {
                 fclose($handle);

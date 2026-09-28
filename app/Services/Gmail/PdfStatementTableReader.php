@@ -89,9 +89,9 @@ class PdfStatementTableReader
         }
 
         $handle = fopen('php://temp', 'w+b');
-        fputcsv($handle, $headers);
+        fputcsv($handle, $headers, ',', '"', '');
         foreach ($rows as $row) {
-            fputcsv($handle, $row);
+            fputcsv($handle, $row, ',', '"', '');
         }
         rewind($handle);
         $csv = stream_get_contents($handle);
@@ -178,7 +178,7 @@ class PdfStatementTableReader
         }
 
         $handle = fopen('php://temp', 'w+b');
-        fputcsv($handle, $headers);
+        fputcsv($handle, $headers, ',', '"', '');
         $rows = 0;
 
         foreach (array_slice($lines, $headerIndex + 1) as $line) {
@@ -190,7 +190,7 @@ class PdfStatementTableReader
                 continue;
             }
 
-            fputcsv($handle, $cells);
+            fputcsv($handle, $cells, ',', '"', '');
             $rows++;
         }
 
