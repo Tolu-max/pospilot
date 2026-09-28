@@ -6,6 +6,7 @@ use App\Models\GmailConnection;
 use App\Models\GmailStatementMessage;
 use App\Models\Provider;
 use App\Services\Gmail\GmailStatementConnector;
+use App\Services\GmailIntegrationConfiguration;
 use App\Services\GmailStatementImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,7 +48,7 @@ final class GmailStatementController extends Controller
         return response()->json(['status' => $connection->fresh()?->status ?? 'disconnected', ...$results]);
     }
 
-    public function status(Request $request): JsonResponse
+    public function status(Request $request, GmailIntegrationConfiguration $configuration): JsonResponse
     {
         $agent = $request->user()->businessAgentProfile();
         abort_unless($agent, 404);
@@ -56,10 +57,7 @@ final class GmailStatementController extends Controller
 
         return response()->json([
             'enabled' => (bool) config('gmail_statement.enabled'),
-            'configured' => filled(config('gmail_statement.client_id'))
-                && filled(config('gmail_statement.client_secret'))
-                && filled(config('gmail_statement.redirect_uri'))
-                && (! app()->environment('production') || config('gmail_statement.token_store') === 'external'),
+            'configured' => $configuration->isConfigured(),
             'connected' => $connection !== null && $connection->status !== 'disconnected',
             'status' => $connection?->status ?? 'disconnected',
             'gmail_address_masked' => $connection?->gmail_address_masked,

@@ -38,6 +38,15 @@ return [
             'report' => false,
         ],
 
+        'gmail_credentials' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/gmail-credentials'),
+            'visibility' => 'private',
+            'directory_visibility' => 'private',
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Contracts\GmailCredentialStore;
 use App\Exceptions\GmailCredentialStoreUnavailable;
 use App\Models\GmailConnection;
+use App\Services\GmailIntegrationConfiguration;
 use App\Services\GoogleGmailClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,10 +17,10 @@ use Throwable;
 
 final class GmailOAuthController extends Controller
 {
-    public function connect(Request $request): RedirectResponse
+    public function connect(Request $request, GmailIntegrationConfiguration $configuration): RedirectResponse
     {
         abort_unless(config('gmail_statement.enabled'), 404);
-        abort_unless($this->configured(), 503, 'Gmail connection is not configured.');
+        abort_unless($configuration->isConfigured(), 503, 'Gmail connection is not configured.');
         abort_unless($request->user()->businessAgentProfile(), 404);
 
         $state = Str::random(64);
@@ -40,9 +41,10 @@ final class GmailOAuthController extends Controller
         return redirect()->away('https://accounts.google.com/o/oauth2/v2/auth?'.$query);
     }
 
-    public function callback(Request $request, GmailCredentialStore $credentials, GoogleGmailClient $gmail): RedirectResponse
+    public function callback(Request $request, GmailCredentialStore $credentials, GoogleGmailClient $gmail, GmailIntegrationConfiguration $configuration): RedirectResponse
     {
         abort_unless(config('gmail_statement.enabled'), 404);
+        abort_unless($configuration->isConfigured(), 503, 'Gmail connection is not configured.');
 
         $expectedState = $request->session()->pull('gmail_oauth_state');
         $agentId = $request->session()->pull('gmail_oauth_agent_id');
@@ -90,8 +92,15 @@ final class GmailOAuthController extends Controller
                 ['agent_profile_id' => $request->user()->businessAgentProfile()->id],
                 ['status' => 'connecting', 'provider_rules' => $request->user()->businessAgentProfile()->statement_sender_rules ?? []],
             );
-            $existingCredentials = $connection->credential()->exists();
-            abort_unless($existingCredentials || is_string($tokens['refresh_token'] ?? null), 422);
+            $existingRefreshToken = false;
+            try {
+                $existingCredentials = $credentials->retrieve($connection);
+                $existingRefreshToken = is_string($existingCredentials['refresh_token'] ?? null)
+                    && trim($existingCredentials['refresh_token']) !== '';
+            } catch (GmailCredentialStoreUnavailable) {
+                $existingRefreshToken = false;
+            }
+            abort_unless($existingRefreshToken || (is_string($tokens['refresh_token'] ?? null) && trim($tokens['refresh_token']) !== ''), 422);
             $credentials->store($connection, [
                 'access_token' => $tokens['access_token'],
                 'refresh_token' => is_string($tokens['refresh_token'] ?? null) ? $tokens['refresh_token'] : null,
@@ -155,13 +164,5 @@ final class GmailOAuthController extends Controller
         }
 
         return redirect('/dashboard?screen=providers')->with('gmail_status', 'Gmail disconnected. POSPilot stopped statement discovery.');
-    }
-
-    private function configured(): bool
-    {
-        return filled(config('gmail_statement.client_id'))
-            && filled(config('gmail_statement.client_secret'))
-            && filled(config('gmail_statement.redirect_uri'))
-            && (! app()->environment('production') || config('gmail_statement.token_store') === 'external');
     }
 }
