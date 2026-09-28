@@ -34,15 +34,17 @@ function Icon({ name, size = 17 }) {
 }
 
 export default function AppShell({ children, title = 'Home' }) {
-    const { auth, url, workspaceReady, workspace } = usePage();
+    const page = usePage();
+    const { auth, userName, workspaceReady, workspace } = page.props;
     const [menuOpen, setMenuOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const businessName = workspace?.business_name || '';
     const accountMenuRef = useRef(null);
     const accountTriggerRef = useRef(null);
-    const currentUrl = new URL(url || window.location.href, window.location.origin);
+    const currentUrl = new URL(page.url || window.location.href, window.location.origin);
     const screen = currentUrl.searchParams.get('screen');
     const user = auth?.user;
+    const accountName = user?.name || userName || 'Your account';
     const isWorkspaceReady = workspaceReady === true;
     const role = workspace?.role || 'owner';
     const visibleNavigation = role === 'owner'
@@ -94,7 +96,7 @@ export default function AppShell({ children, title = 'Home' }) {
             <div className="sidebar-bottom">
                 <div className="sidebar-account-card">
                     <span className="account-brand-avatar account-brand-avatar-sidebar"><BrandLogo compact /></span>
-                    <span className="profile-copy"><strong>{user?.name || 'Your account'}</strong><span>{businessName || 'Business workspace'}</span></span>
+                    <span className="profile-copy"><strong>{accountName}</strong><span>{businessName || 'Business workspace'}</span></span>
                 </div>
             </div>
         </aside>
@@ -109,14 +111,14 @@ export default function AppShell({ children, title = 'Home' }) {
                 <div className="topbar-actions">
                     <span className="topbar-page-title">{title}</span>
                     <div className="account-menu" ref={accountMenuRef}>
-                        <button ref={accountTriggerRef} type="button" className="account-menu-trigger" aria-label={`Account menu for ${user?.name || 'your account'}`} aria-haspopup="true" aria-expanded={accountOpen} aria-controls="account-menu-panel" onClick={() => setAccountOpen((open) => !open)}>
+                        <button ref={accountTriggerRef} type="button" className="account-menu-trigger" aria-label={`Account menu for ${accountName}`} aria-haspopup="true" aria-expanded={accountOpen} aria-controls="account-menu-panel" onClick={() => setAccountOpen((open) => !open)}>
                             <span className="account-brand-avatar account-brand-avatar-header"><BrandLogo compact /></span>
-                            <span className="account-trigger-copy"><strong>{user?.name || 'Your account'}</strong><small>Account</small></span>
+                            <span className="account-trigger-copy"><strong>{accountName}</strong><small>Account</small></span>
                             <Icon name="chevron" size={15} />
                         </button>
                         {accountOpen && <div id="account-menu-panel" className="account-menu-panel">
                             <div className="account-menu-identity">
-                                <strong>{user?.name || 'Your account'}</strong>
+                                <strong>{accountName}</strong>
                                 {user?.email && <span>{user.email}</span>}
                                 <small>{businessName || 'Business workspace'}</small>
                             </div>

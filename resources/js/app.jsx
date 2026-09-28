@@ -8,7 +8,7 @@ import '../css/max/inertia-adapter.css';
 import '../css/max/polish.css';
 import './bootstrap';
 
-import BrandLogo from './Components/BrandLogo';
+import FullPageLoader from './Components/FullPageLoader';
 import Sabilytics from './Components/Sabilytics';
 import { createInertiaApp, router } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
@@ -46,15 +46,7 @@ function InertiaLoadingOverlay() {
         return null;
     }
 
-    return (
-        <div className="page-loading-overlay" role="status" aria-live="polite" aria-label="Loading page">
-            <div className="page-loading-card">
-                <BrandLogo className="page-loading-brand" />
-                <span className="page-loading-spinner" aria-hidden="true" />
-                <span className="page-loading-label">Loading your workspace</span>
-            </div>
-        </div>
-    );
+    return <FullPageLoader label="Loading your workspace" />;
 }
 
 createInertiaApp({

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, router, usePage } from '@inertiajs/react';
 import AppShell from '../../Layouts/AppShell';
 import ProviderLogo from '../../Components/ProviderLogo';
+import FullPageLoader from '../../Components/FullPageLoader';
 import { api } from '../../lib/api';
 import { Button, Card, ErrorNotice, Field, LoadingCard, Notice, StatusPill } from '../../Components/PosPilotUI';
 import { trackSafeEvent } from '../../lib/analytics';
@@ -24,6 +25,7 @@ export default function ProviderAutomation() {
     const [mappings, setMappings] = useState({});
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
+    const [redirectingToGmail, setRedirectingToGmail] = useState(false);
     const [error, setError] = useState(null);
     const [notice, setNotice] = useState(null);
 
@@ -107,7 +109,16 @@ export default function ProviderAutomation() {
     const rulesPersisted = selected.length > 0 && selected.length === savedProviders.length && selected.every((slug) => savedProviders.includes(slug)
         && (status?.provider_rules?.[slug]?.sender_email || '') === (rules[slug]?.sender_email || ''));
 
-    return <AppShell title="Providers / Data Sources"><div className="ops-page">
+    function beginGmailRedirect(event) {
+        if (!status?.enabled || !status?.configured || !rulesPersisted) {
+            event.preventDefault();
+            return;
+        }
+
+        setRedirectingToGmail(true);
+    }
+
+    return <AppShell title="Providers / Data Sources">{redirectingToGmail && <FullPageLoader label="Connecting Gmail" />}<div className="ops-page">
         <header className="ops-heading"><div><span className="eyebrow"><span className="eyebrow-dot" /> PROVIDERS / DATA SOURCES</span><h1>Connect transaction sources</h1><p>POSPilot brings your POS transactions, charges, fees, expenses and reconciliation into one place.</p></div></header>
         {error && <div className="mb-5"><ErrorNotice error={error} /></div>}{notice && <div className="mb-5"><Notice tone="success">{notice}</Notice></div>}
         {loading ? <LoadingCard label="Checking provider setup…" /> : <div className="space-y-5">
@@ -129,7 +140,7 @@ export default function ProviderAutomation() {
                 </Card>
             </form>
             <Card id="gmail-settings"><div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-extrabold">Email Statements · Gmail</h2><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Connect Gmail so POSPilot can find POS statements sent to your inbox. This authorization is separate from Google sign-in. Google’s <code>gmail.readonly</code> scope is restricted and technically allows viewing messages and settings across Gmail. POSPilot is designed to search for and process statement emails matching the providers you configure. Unrelated email content is not used by POSPilot’s statement processing.</p><p className="mt-2 text-sm text-slate-600">POSPilot does not receive every provider transaction automatically by email. Request or send a statement from your provider app first. After it arrives, POSPilot searches for it, retrieves the attachment, maps the account and terminal, and imports through its existing financial pipeline. OAuth tokens stay server-side in encrypted storage.</p></div><StatusPill tone={status?.connected ? 'good' : 'neutral'}>{statusLabels[status?.status] || 'Gmail disconnected'}</StatusPill></div>
-                {status?.connected ? <div className="mt-4 flex flex-wrap gap-3"><span className="self-center text-sm font-semibold text-slate-700">Email: {status.gmail_address_masked || 'Connected'}</span>{status.status === 'permission_expired' ? <a className="secondary-button" href={status?.configured && rulesPersisted ? '/integrations/gmail/connect' : undefined}>Reconnect Gmail</a> : <><Button type="button" variant="secondary" onClick={syncNow} disabled={busy || !rulesPersisted || !status?.enabled}>Check for statements</Button><Button type="button" variant="secondary" onClick={importOlder} disabled={busy || !rulesPersisted || !status?.enabled}>Import older statements</Button></>}<Button type="button" variant="danger" onClick={() => router.delete('/integrations/gmail')} disabled={busy}>Disconnect Gmail</Button><span className="self-center text-sm text-slate-600">{status.last_synced_at ? `Last checked ${new Date(status.last_synced_at).toLocaleString()}` : 'Never checked'}</span><span className="basis-full text-sm text-slate-600">Older import searches matching provider statement attachments from the past year. Unrelated email is excluded.</span></div> : <a className="primary-button mt-4 inline-flex" href={status?.enabled && status?.configured && rulesPersisted ? '/integrations/gmail/connect' : undefined} aria-disabled={!status?.enabled || !status?.configured || !rulesPersisted} onClick={(event) => { if (!status?.enabled || !status?.configured || !rulesPersisted) event.preventDefault(); }}>{status?.configured ? 'Connect Gmail' : 'Gmail setup unavailable'}</a>}
+                {status?.connected ? <div className="mt-4 flex flex-wrap gap-3"><span className="self-center text-sm font-semibold text-slate-700">Email: {status.gmail_address_masked || 'Connected'}</span>{status.status === 'permission_expired' ? <a className="secondary-button" href={status?.configured && rulesPersisted ? '/integrations/gmail/connect' : undefined} onClick={beginGmailRedirect}>Reconnect Gmail</a> : <><Button type="button" variant="secondary" onClick={syncNow} disabled={busy || !rulesPersisted || !status?.enabled}>Check for statements</Button><Button type="button" variant="secondary" onClick={importOlder} disabled={busy || !rulesPersisted || !status?.enabled}>Import older statements</Button></>}<Button type="button" variant="danger" onClick={() => router.delete('/integrations/gmail')} disabled={busy}>Disconnect Gmail</Button><span className="self-center text-sm text-slate-600">{status.last_synced_at ? `Last checked ${new Date(status.last_synced_at).toLocaleString()}` : 'Never checked'}</span><span className="basis-full text-sm text-slate-600">Older import searches matching provider statement attachments from the past year. Unrelated email is excluded.</span></div> : <a className="primary-button mt-4 inline-flex" href={status?.enabled && status?.configured && rulesPersisted ? '/integrations/gmail/connect' : undefined} aria-disabled={!status?.enabled || !status?.configured || !rulesPersisted} aria-busy={redirectingToGmail} onClick={beginGmailRedirect}>{redirectingToGmail ? 'Connecting…' : status?.configured ? 'Connect Gmail' : 'Gmail setup unavailable'}</a>}
                 <p className="mt-3 text-xs leading-5 text-slate-500">Testing mode is limited to Google Cloud test users. Refresh tokens expire after about seven days. General Gmail access requires Google's restricted-scope verification.</p>
             </Card>
             <Card><div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-extrabold">Statement inbox</h2><p className="mt-1 text-sm text-slate-600">CSV and XLSX spreadsheet attachments are supported. PDF, legacy XLS, and other formats are marked unsupported.</p></div></div>

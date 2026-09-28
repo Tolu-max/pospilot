@@ -1,10 +1,13 @@
 import { Head, Link, useForm } from '@inertiajs/react';
+import { useState } from 'react';
 import GoogleMark from '../../Components/GoogleMark';
+import FullPageLoader from '../../Components/FullPageLoader';
 import { Button, Field, Notice } from '../../Components/PosPilotUI';
 import GuestLayout from '../../Layouts/GuestLayout';
 
 export default function Login({ status, canResetPassword }) {
     const form = useForm({ email: '', password: '', remember: false });
+    const [redirectingToGoogle, setRedirectingToGoogle] = useState(false);
 
     function submit(event) {
         event.preventDefault();
@@ -13,6 +16,7 @@ export default function Login({ status, canResetPassword }) {
 
     return (
         <GuestLayout>
+            {redirectingToGoogle && <FullPageLoader label="Connecting to Google" />}
             <Head title="Sign in" />
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-brand-accent">Welcome back</p>
             <h1 className="text-2xl font-black">Sign in to POSPilot</h1>
@@ -20,7 +24,7 @@ export default function Login({ status, canResetPassword }) {
 
             {status && <div className="mt-5"><Notice tone="success">{status}</Notice></div>}
 
-            <a href="/auth/google/redirect" className="mt-6 flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-brand-line bg-white px-4 font-bold text-slate-700 transition-colors hover:bg-brand-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2">
+            <a href="/auth/google/redirect" onClick={() => setRedirectingToGoogle(true)} aria-busy={redirectingToGoogle} className="mt-6 flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-brand-line bg-white px-4 font-bold text-slate-700 transition-colors hover:bg-brand-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2">
                 <GoogleMark />
                 Continue with Google
             </a>

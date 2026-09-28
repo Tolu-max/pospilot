@@ -1,10 +1,13 @@
 import { Head, Link, useForm } from '@inertiajs/react';
+import { useState } from 'react';
 import GoogleMark from '../../Components/GoogleMark';
+import FullPageLoader from '../../Components/FullPageLoader';
 import { Button, Field, Notice } from '../../Components/PosPilotUI';
 import GuestLayout from '../../Layouts/GuestLayout';
 
 export default function Register() {
     const form = useForm({ name: '', email: '', password: '', password_confirmation: '' });
+    const [redirectingToGoogle, setRedirectingToGoogle] = useState(false);
 
     function submit(event) {
         event.preventDefault();
@@ -13,6 +16,7 @@ export default function Register() {
 
     return (
         <GuestLayout>
+            {redirectingToGoogle && <FullPageLoader label="Creating your account with Google" />}
             <Head title="Create account" />
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-brand-accent">Get started</p>
             <h1 className="text-2xl font-black">Create your POSPilot account</h1>
@@ -37,7 +41,7 @@ export default function Register() {
                 <span className="h-px flex-1 bg-slate-200" />
             </div>
 
-            <a href="/auth/google/redirect" className="flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-brand-line bg-white px-4 font-bold text-slate-700 transition-colors hover:bg-brand-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2">
+            <a href="/auth/google/redirect" onClick={() => setRedirectingToGoogle(true)} aria-busy={redirectingToGoogle} className="flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-brand-line bg-white px-4 font-bold text-slate-700 transition-colors hover:bg-brand-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2">
                 <GoogleMark />
                 Continue with Google
             </a>
