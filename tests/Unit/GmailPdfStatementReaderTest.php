@@ -34,7 +34,7 @@ class GmailPdfStatementReaderTest extends TestCase
         $pdf = $this->positionedPdf([
             [80, 740, 'Account Number'], [180, 740, '0123456789'],
             [50, 700, 'Trans. Time'], [120, 700, 'Value Date'], [185, 700, 'Description'], [250, 700, 'Debit (NGN)'],
-            [300, 700, 'Credit (NGN)'], [340, 700, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
+            [300, 700, 'Credit (NGN)'], [340, 706, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
             [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, 'POS purchase'], [250, 680, '-'],
             [300, 680, '5,000.00'], [340, 680, '17,000.00'], [390, 680, 'POS'], [455, 680, 'OP-TEST-REF-1001'],
             [50, 660, '09:30:00 AM'], [120, 660, '09/28/2026'], [185, 660, 'Airtime purchase'], [250, 660, '1,000.00'],
@@ -81,7 +81,7 @@ class GmailPdfStatementReaderTest extends TestCase
     {
         $pdf = $this->positionedPdf([
             [50, 700, 'Trans. Time'], [120, 700, 'Value Date'], [185, 700, 'Description'], [250, 700, 'Debit (NGN)'],
-            [300, 700, 'Credit (NGN)'], [340, 700, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
+            [300, 700, 'Credit (NGN)'], [340, 706, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
             [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, 'POS purchase'], [250, 680, '1,000.00'],
             [300, 680, '5,000.00'], [340, 680, '17,000.00'], [390, 680, 'POS'], [455, 680, 'OP-TEST-REF-1001'],
         ]);

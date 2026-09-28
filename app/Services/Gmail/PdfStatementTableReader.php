@@ -9,6 +9,8 @@ use RuntimeException;
 
 class PdfStatementTableReader
 {
+    private const HEADER_CLUSTER_Y_TOLERANCE = 8.0;
+
     /**
      * @param  list<list<array{x:float,y:float,text:string}>>  $pages
      * @return array{csv:string,headers:list<string>,rows:int}
@@ -235,7 +237,7 @@ class PdfStatementTableReader
      */
     private function findHeaderLayout(array $groups, string $providerSlug): ?array
     {
-        $best = null;
+        $headerGroups = [];
         foreach ($groups as $y => $elements) {
             $columns = [];
             foreach ($elements as $element) {
@@ -245,12 +247,35 @@ class PdfStatementTableReader
                 }
             }
 
-            $required = $providerSlug === 'opay'
-                ? ['time', 'value_date', 'description', 'debit', 'credit', 'balance', 'channel', 'reference']
-                : ['date', 'detail', 'money_in', 'money_out', 'id'];
+            if ($columns !== []) {
+                $headerGroups[] = ['y' => (float) $y, 'columns' => $columns];
+            }
+        }
+
+        $required = $providerSlug === 'opay'
+            ? ['time', 'value_date', 'description', 'debit', 'credit', 'balance', 'channel', 'reference']
+            : ['date', 'detail', 'money_in', 'money_out', 'id'];
+        $best = null;
+        $bestAnchorColumnCount = 0;
+        foreach ($headerGroups as $anchor) {
+            $columns = $anchor['columns'];
+            foreach ($headerGroups as $nearby) {
+                if (abs($nearby['y'] - $anchor['y']) > self::HEADER_CLUSTER_Y_TOLERANCE) {
+                    continue;
+                }
+
+                foreach ($nearby['columns'] as $field => $x) {
+                    $columns[$field] ??= $x;
+                }
+            }
+
             if (count(array_intersect($required, array_keys($columns))) === count($required)) {
-                if ($best === null || count($columns) > count($best['columns'])) {
-                    $best = ['y' => (float) $y, 'columns' => $columns];
+                $anchorColumnCount = count($anchor['columns']);
+                if ($best === null
+                    || count($columns) > count($best['columns'])
+                    || (count($columns) === count($best['columns']) && $anchorColumnCount > $bestAnchorColumnCount)) {
+                    $best = ['y' => $anchor['y'], 'columns' => $columns];
+                    $bestAnchorColumnCount = $anchorColumnCount;
                 }
             }
         }
