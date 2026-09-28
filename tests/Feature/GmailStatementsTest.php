@@ -268,14 +268,99 @@ class GmailStatementsTest extends TestCase
             'terminal_identifier' => 'Terminal',
         ], $terminal->id);
         $this->assertNotSame('OPAY-TERM-4821', $profile->match_identifier_fingerprint);
+        $imports->process($statement, $profile);
 
         $connection->update(['last_synced_at' => null, 'status' => 'connected']);
         app(GmailStatementConnector::class)->sync($connection);
 
         $future = $connection->messages()->get()->first(fn (GmailStatementMessage $candidate): bool => $candidate->gmail_message_id === 'future-statement-message');
         $this->assertNotNull($future);
-        $this->assertSame('processed', $future->status);
+        $this->assertSame('duplicate_attachment', $future->status);
         $this->assertSame(1, Transaction::where('agent_profile_id', $agent->id)->count());
+    }
+
+    public function test_gmail_sync_marks_repeated_attachment_content_as_duplicate_before_setup(): void
+    {
+        Storage::fake('local');
+        $agent = AgentProfile::factory()->create(['selected_provider_slugs' => ['opay']]);
+        Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
+        $connection = $this->createGmailConnection($agent, [
+            'provider_rules' => ['opay' => ['sender_email' => 'statements@opay.example.test']],
+            'status' => 'connected',
+        ]);
+        $csv = "Reference,Amount,Date,Status\nFICTIONAL-REF-1,5000.00,2026-09-27 10:30:00,successful\n";
+        $attachment = rtrim(strtr(base64_encode($csv), '+/', '-_'), '=');
+        $headers = ['headers' => [
+            ['name' => 'From', 'value' => 'OPay <statements@opay.example.test>'],
+            ['name' => 'Subject', 'value' => 'OPay statement'],
+        ]];
+        Http::fake(['https://gmail.googleapis.com/*' => Http::sequence()
+            ->push(['messages' => [['id' => 'older-message'], ['id' => 'newer-message']]])
+            ->push(['internalDate' => (string) now()->subMinute()->getTimestampMs(), 'payload' => $headers])
+            ->push(['internalDate' => (string) now()->getTimestampMs(), 'payload' => $headers])
+            ->push(['payload' => ['parts' => [['filename' => 'statement.csv', 'body' => ['attachmentId' => 'newer-attachment', 'size' => strlen($csv)]]]]])
+            ->push(['data' => $attachment])
+            ->push(['payload' => ['parts' => [['filename' => 'statement.csv', 'body' => ['attachmentId' => 'older-attachment', 'size' => strlen($csv)]]]]])
+            ->push(['data' => $attachment]),
+        ]);
+
+        app(GmailStatementConnector::class)->sync($connection);
+
+        $messages = $connection->messages()->get();
+        $this->assertSame(2, $messages->count());
+        $this->assertSame(1, $messages->where('status', 'needs_setup')->count());
+        $this->assertSame(1, $messages->where('status', 'duplicate_attachment')->count());
+        $this->assertSame(0, Transaction::where('agent_profile_id', $agent->id)->count());
+    }
+
+    public function test_previously_unrecognized_pdf_is_retried_and_exposes_safe_mapping_headers(): void
+    {
+        Storage::fake('local');
+        $agent = AgentProfile::factory()->create(['selected_provider_slugs' => ['opay']]);
+        $provider = Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
+        $connection = $this->createGmailConnection($agent, [
+            'provider_rules' => ['opay' => ['sender_email' => 'statements@opay.example.test']],
+            'status' => 'connected',
+        ]);
+        $messageId = 'previously-unrecognized-pdf';
+        $attachmentId = 'fictional-pdf-attachment';
+        $processedMessageFingerprint = hash_hmac('sha256', $connection->id.'|message|'.$messageId, (string) config('app.key'));
+        $dedupeFingerprint = hash_hmac('sha256', $connection->id.'|'.$messageId.'|'.$attachmentId, (string) config('app.key'));
+        $record = GmailStatementMessage::create([
+            'gmail_connection_id' => $connection->id,
+            'agent_profile_id' => $agent->id,
+            'provider_id' => $provider->id,
+            'dedupe_fingerprint' => $dedupeFingerprint,
+            'processed_message_fingerprint' => $processedMessageFingerprint,
+            'gmail_message_id' => $messageId,
+            'gmail_attachment_id' => $attachmentId,
+            'file_name' => 'statement.pdf',
+            'file_type' => 'pdf',
+            'status' => 'unsupported_schema',
+            'failure_code' => 'unsupported_schema',
+            'received_at' => now()->subDay(),
+        ]);
+        $pdf = $this->opayPositionedPdf();
+        $attachment = rtrim(strtr(base64_encode($pdf), '+/', '-_'), '=');
+        Http::fake(['https://gmail.googleapis.com/*' => Http::sequence()
+            ->push(['messages' => [['id' => $messageId]]])
+            ->push(['internalDate' => (string) now()->getTimestampMs(), 'payload' => ['headers' => [
+                ['name' => 'From', 'value' => 'OPay <statements@opay.example.test>'],
+                ['name' => 'Subject', 'value' => 'OPay statement'],
+            ]]])
+            ->push(['payload' => ['parts' => [['filename' => 'statement.pdf', 'body' => ['attachmentId' => $attachmentId, 'size' => strlen($pdf)]]]]])
+            ->push(['data' => $attachment]),
+        ]);
+
+        app(GmailStatementConnector::class)->sync($connection);
+
+        $this->assertSame('needs_setup', $record->fresh()->status);
+        $this->assertSame(['Transaction Reference', 'Amount', 'Date', 'Status', 'Transaction Type', 'Provider Account Identifier'], $record->fresh()->headers);
+        $this->assertNotNull($record->fresh()->masked_account_identifier);
+        $this->assertNotSame('0123456789', $record->fresh()->masked_account_identifier);
+        $this->assertStringNotContainsString('0123456789', json_encode($record->fresh()->toArray(), JSON_THROW_ON_ERROR));
+        $this->assertNotNull($record->fresh()->temporary_file_path);
+        $this->assertSame(0, Transaction::where('agent_profile_id', $agent->id)->count());
     }
 
     public function test_mapped_csv_uses_existing_ingestion_and_keeps_missing_fees_unverified_and_idempotent(): void
@@ -378,5 +463,42 @@ class GmailStatementsTest extends TestCase
         ]);
 
         return $connection;
+    }
+
+    private function opayPositionedPdf(): string
+    {
+        $elements = [
+            [80, 740, 'Account Number'], [180, 740, '0123456789'],
+            [50, 700, 'Trans. Time'], [120, 700, 'Value Date'], [185, 700, 'Description'], [250, 700, 'Debit(₦)'],
+            [300, 700, 'Credit(₦)'], [340, 700, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
+            [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, 'POS purchase'], [250, 680, '-'],
+            [300, 680, '5,000.00'], [340, 680, '17,000.00'], [390, 680, 'POS'], [455, 680, 'FICTIONAL-REF-1'],
+        ];
+        $stream = '';
+        foreach ($elements as [$x, $y, $text]) {
+            $escapedText = str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
+            $stream .= 'BT /F1 10 Tf '.$x.' '.$y.' Td ('.$escapedText.') Tj ET ';
+        }
+        $objects = [
+            '<< /Type /Catalog /Pages 2 0 R >>',
+            '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+            '<< /Length '.strlen($stream).' >>'."\nstream\n".$stream."\nendstream",
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ];
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+        foreach ($objects as $index => $object) {
+            $offsets[] = strlen($pdf);
+            $pdf .= ($index + 1)." 0 obj\n".$object."\nendobj\n";
+        }
+        $xrefOffset = strlen($pdf);
+        $pdf .= "xref\n0 6\n0000000000 65535 f \n";
+        foreach (array_slice($offsets, 1) as $offset) {
+            $pdf .= sprintf("%010d 00000 n \n", $offset);
+        }
+        $pdf .= "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n".$xrefOffset."\n%%EOF";
+
+        return $pdf;
     }
 }

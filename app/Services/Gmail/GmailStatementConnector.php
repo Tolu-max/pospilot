@@ -60,7 +60,14 @@ final class GmailStatementConnector
                     ->where('processed_message_fingerprint', $messageFingerprint)->exists();
                 $retryablePdf = GmailStatementMessage::where('gmail_connection_id', $connection->id)
                     ->where('processed_message_fingerprint', $messageFingerprint)
-                    ->where('status', 'unsupported_format')->where('failure_code', 'pdf_not_supported')->exists();
+                    ->where('file_type', 'pdf')
+                    ->where(function ($query): void {
+                        $query->where(function ($query): void {
+                            $query->where('status', 'unsupported_format')->where('failure_code', 'pdf_not_supported');
+                        })->orWhere(function ($query): void {
+                            $query->where('status', 'unsupported_schema')->where('failure_code', 'unsupported_schema')->whereNull('headers');
+                        });
+                    })->exists();
                 if ($seenMessage && ! $retryablePdf) {
                     continue;
                 }
@@ -139,8 +146,8 @@ final class GmailStatementConnector
             $dedupe = hash_hmac('sha256', $connection->id.'|'.$messageId.'|'.$attachmentId, (string) config('app.key'));
             $existing = GmailStatementMessage::where('gmail_connection_id', $connection->id)->where('dedupe_fingerprint', $dedupe)->first();
             $retryUnsupportedPdf = $extension === 'pdf'
-                && $existing?->status === 'unsupported_format'
-                && $existing?->failure_code === 'pdf_not_supported';
+                && ($existing?->status === 'unsupported_format' && $existing?->failure_code === 'pdf_not_supported'
+                    || $existing?->status === 'unsupported_schema' && $existing?->failure_code === 'unsupported_schema' && $existing?->headers === null);
             if ($existing && $existing->status !== 'failed' && ! $retryUnsupportedPdf) {
                 continue;
             }
@@ -182,26 +189,28 @@ final class GmailStatementConnector
                     continue;
                 }
                 $attachmentFingerprint = hash_hmac('sha256', $connection->id.'|attachment|'.hash('sha256', $contents), (string) config('app.key'));
-                $duplicateAttachment = GmailStatementMessage::where('gmail_connection_id', $connection->id)
+                $record->update(['attachment_fingerprint' => $attachmentFingerprint]);
+                $matchingAttachments = GmailStatementMessage::where('gmail_connection_id', $connection->id)
                     ->where('attachment_fingerprint', $attachmentFingerprint)
-                    ->where('id', '!=', $record->id)
-                    ->where('status', 'processed')
-                    ->first();
-                if ($duplicateAttachment) {
+                    ->where('id', '!=', $record->id);
+                $alreadyHandledAttachment = (clone $matchingAttachments)->whereIn('status', ['processed', 'needs_setup'])->exists();
+                $newestAttachment = (clone $matchingAttachments)->orderByDesc('received_at')->orderByDesc('id')->first();
+                $isNewestAttachment = ! $newestAttachment
+                    || ($record->received_at?->greaterThan($newestAttachment->received_at) ?? false)
+                    || ($record->received_at?->equalTo($newestAttachment->received_at) === true && $record->id > $newestAttachment->id);
+                if ($alreadyHandledAttachment || ! $isNewestAttachment) {
                     $record->update([
-                        'attachment_fingerprint' => $attachmentFingerprint,
                         'status' => 'duplicate_attachment',
                         'failure_code' => null,
                     ]);
 
                     continue;
                 }
-                $record->update(['attachment_fingerprint' => $attachmentFingerprint]);
                 if ($extension === 'xlsx') {
                     $contents = $this->xlsx->toCsv($contents);
                 } elseif ($extension === 'pdf') {
-                    $text = $this->pdfReader->extractText($contents);
-                    $contents = $this->pdfTables->toCsv($text)['csv'];
+                    $pages = $this->pdfReader->extractPositionedPages($contents);
+                    $contents = $this->pdfTables->toCsvFromPositionedPages($pages, $provider->slug)['csv'];
                 }
                 $schema = $this->imports->inspect($contents);
                 $record->update([
@@ -219,6 +228,7 @@ final class GmailStatementConnector
                     'pdf_scanned_unsupported' => 'pdf_scanned_unsupported',
                     'pdf_page_limit_exceeded' => 'pdf_page_limit_exceeded',
                     'pdf_parse_failed' => 'pdf_parse_failed',
+                    'unsupported_schema' => $extension === 'pdf' ? 'pdf_table_unrecognized' : 'unsupported_schema',
                     default => 'unsupported_schema',
                 };
                 $record->update([
