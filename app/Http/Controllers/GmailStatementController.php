@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SyncConnectedGmailStatements;
 use App\Models\GmailConnection;
 use App\Models\GmailStatementMessage;
 use App\Models\Provider;
@@ -14,9 +15,23 @@ use Illuminate\Validation\Rule;
 
 final class GmailStatementController extends Controller
 {
-    public function sync(Request $request, GmailStatementConnector $connector): JsonResponse
+    public function sync(Request $request): JsonResponse
     {
-        return $this->runSync($request, $connector, false);
+        abort_unless(config('gmail_statement.enabled'), 404);
+        $agent = $request->user()->businessAgentProfile();
+        abort_unless($agent, 404);
+        $connection = GmailConnection::where('agent_profile_id', $agent->id)
+            ->whereIn('status', ['connected', 'sync_error', 'sync_queued'])
+            ->first();
+        abort_unless($connection, 422, 'Connect Gmail before syncing statements.');
+        abort_unless(count($agent->selected_provider_slugs ?? []) > 0, 422, 'Choose at least one provider in connection settings.');
+
+        if ($connection->status !== 'sync_queued') {
+            $connection->update(['status' => 'sync_queued', 'last_sync_status' => 'queued', 'last_error_code' => null]);
+        }
+        SyncConnectedGmailStatements::dispatch($connection->id);
+
+        return response()->json(['status' => 'sync_queued'], 202);
     }
 
     public function importOlder(Request $request, GmailStatementConnector $connector): JsonResponse
@@ -71,6 +86,9 @@ final class GmailStatementController extends Controller
                 'needs_setup' => (clone $messages)->where('status', 'needs_setup')->count(),
                 'unsupported_format' => (clone $messages)->where('status', 'unsupported_format')->count(),
                 'processed' => (clone $messages)->where('status', 'processed')->count(),
+                'rows_imported' => (clone $messages)->where('status', 'processed')->sum('rows_imported'),
+                'rows_duplicate' => (clone $messages)->where('status', 'processed')->sum('rows_duplicate'),
+                'rows_failed' => (clone $messages)->where('status', 'processed')->sum('rows_failed'),
             ],
         ]);
     }
@@ -99,7 +117,12 @@ final class GmailStatementController extends Controller
         $senders = array_values(array_filter(array_column(array_values($rules), 'sender_email')));
         abort_unless(count($senders) === count(array_unique($senders)), 422, 'Use a distinct sender email for each provider so statements cannot be assigned to the wrong provider.');
         $agent->update(['selected_provider_slugs' => $validated['selected_provider_slugs'], 'statement_sender_rules' => $rules]);
-        GmailConnection::where('agent_profile_id', $agent->id)->update(['provider_rules' => $rules]);
+        $connection = GmailConnection::where('agent_profile_id', $agent->id)->first();
+        $connection?->update(['provider_rules' => $rules]);
+        if ($connection && $connection->status === 'connected') {
+            $connection->update(['status' => 'sync_queued', 'last_sync_status' => 'queued', 'last_error_code' => null]);
+            SyncConnectedGmailStatements::dispatch($connection->id);
+        }
 
         return response()->json(['selected_provider_slugs' => $agent->selected_provider_slugs, 'provider_rules' => $agent->statement_sender_rules]);
     }
@@ -110,7 +133,7 @@ final class GmailStatementController extends Controller
         abort_unless($agent, 404);
         $messages = GmailStatementMessage::where('agent_profile_id', $agent->id)
             ->with('provider:id,name,slug')
-            ->whereIn('status', ['needs_setup', 'unsupported_format', 'unsupported_schema', 'rejected', 'failed', 'needs_setup_expired', 'processed'])
+            ->whereIn('status', ['needs_setup', 'unsupported_format', 'unsupported_schema', 'rejected', 'failed', 'needs_setup_expired', 'processed', 'duplicate_attachment'])
             ->latest('received_at')->limit(50)->get()
             ->map(fn (GmailStatementMessage $message): array => [
                 'id' => $message->id,
@@ -163,6 +186,10 @@ final class GmailStatementController extends Controller
             'gmail_disconnected' => 'gmail_disconnected',
             'attachment_too_large' => 'attachment_too_large',
             'unsupported_schema' => 'unsupported_schema',
+            'pdf_scanned_unsupported' => 'pdf_scanned_unsupported',
+            'pdf_page_limit_exceeded' => 'pdf_page_limit_exceeded',
+            'pdf_parse_failed' => 'pdf_parse_failed',
+            'duplicate_attachment' => 'duplicate_attachment',
             'attachment_read_failed' => 'attachment_read_failed',
             'invalid_headers' => 'unsupported_schema',
             'mapping_expired' => 'mapping_expired',

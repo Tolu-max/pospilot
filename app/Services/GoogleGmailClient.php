@@ -32,7 +32,7 @@ final class GoogleGmailClient
                 }
             }
             $pageToken = $response->json('nextPageToken');
-        } while (is_string($pageToken) && $pageToken !== '' && count($messages) < 200);
+        } while (is_string($pageToken) && $pageToken !== '');
 
         return $messages;
     }

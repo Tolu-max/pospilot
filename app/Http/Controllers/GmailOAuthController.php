@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Contracts\GmailCredentialStore;
 use App\Exceptions\GmailCredentialStoreUnavailable;
+use App\Jobs\SyncConnectedGmailStatements;
 use App\Models\GmailConnection;
 use App\Services\GmailIntegrationConfiguration;
 use App\Services\GoogleGmailClient;
@@ -109,11 +110,12 @@ final class GmailOAuthController extends Controller
             $localPart = strstr($emailAddress, '@', true) ?: '';
             $domain = substr(strstr($emailAddress, '@') ?: '', 1);
             $connection->update([
-                'status' => 'connected',
+                'status' => 'sync_queued',
                 'gmail_address_masked' => mb_substr($localPart, 0, 1).'••••@'.$domain,
                 'connected_at' => now(),
                 'disconnected_at' => null,
                 'last_error_code' => null,
+                'last_sync_status' => 'queued',
             ]);
         } catch (GmailCredentialStoreUnavailable) {
             if ($connection?->status === 'connecting') {
@@ -129,8 +131,14 @@ final class GmailOAuthController extends Controller
             return redirect('/dashboard?screen=providers')->with('gmail_error', 'Gmail could not be connected. Check the Google setup and try again.');
         }
 
+        try {
+            SyncConnectedGmailStatements::dispatch($connection->id);
+        } catch (Throwable) {
+            $connection->update(['status' => 'connected', 'last_sync_status' => 'failed', 'last_error_code' => 'gmail_sync_queue_failed']);
+        }
+
         return redirect('/dashboard?screen=providers')
-            ->with('gmail_status', 'Gmail connected. Configure provider sender rules to begin matching statement emails.')
+            ->with('gmail_status', 'Gmail connected. POSPilot is checking recent statement emails.')
             ->with('analytics_event', ['name' => 'gmail_connected', 'id' => (string) Str::uuid()]);
     }
 

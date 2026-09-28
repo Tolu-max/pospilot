@@ -17,6 +17,7 @@ use App\Services\XlsxStatementReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -50,6 +51,7 @@ class GmailStatementsTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
         $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
         Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
+        Queue::fake([SyncConnectedGmailStatements::class]);
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response([
                 'access_token' => 'fictional-access-token',
@@ -86,6 +88,7 @@ class GmailStatementsTest extends TestCase
         $this->assertArrayNotHasKey('refresh_token', $credential->toArray());
         $this->assertSame('o••••@example.test', $connection->gmail_address_masked);
         $this->assertDatabaseMissing('gmail_connections', ['agent_profile_id' => $agent->id, 'access_token' => 'fictional-access-token']);
+        Queue::assertPushed(SyncConnectedGmailStatements::class, fn (SyncConnectedGmailStatements $job): bool => $job->connectionId === $connection->id);
     }
 
     public function test_gmail_routes_stay_hidden_when_feature_flag_is_disabled(): void
@@ -98,7 +101,7 @@ class GmailStatementsTest extends TestCase
         $this->actingAs($user)->postJson('/integrations/gmail/sync')->assertNotFound();
     }
 
-    public function test_manual_sync_runs_for_only_the_authenticated_agents_gmail_connection(): void
+    public function test_manual_sync_queues_only_the_authenticated_agents_gmail_connection(): void
     {
         config()->set('gmail_statement.enabled', true);
         $firstUser = User::factory()->create(['email_verified_at' => now()]);
@@ -108,13 +111,14 @@ class GmailStatementsTest extends TestCase
         Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
         $firstConnection = $this->createGmailConnection($firstAgent, ['status' => 'connected']);
         $secondConnection = $this->createGmailConnection($secondAgent, ['status' => 'sync_error']);
+        Queue::fake([SyncConnectedGmailStatements::class]);
 
-        $this->actingAs($firstUser)->postJson('/integrations/gmail/sync')->assertOk()->assertJson(['status' => 'connected', 'candidates_checked' => 0, 'statements_found' => 0]);
-        $this->actingAs($secondUser)->postJson('/integrations/gmail/sync')->assertOk()->assertJson(['status' => 'connected', 'candidates_checked' => 0, 'statements_found' => 0]);
+        $this->actingAs($firstUser)->postJson('/integrations/gmail/sync')->assertAccepted()->assertJson(['status' => 'sync_queued']);
+        $this->actingAs($secondUser)->postJson('/integrations/gmail/sync')->assertAccepted()->assertJson(['status' => 'sync_queued']);
 
-        $this->assertSame('connected', $firstConnection->fresh()->status);
-        $this->assertSame('connected', $secondConnection->fresh()->status);
-        $this->assertNotNull($firstConnection->fresh()->last_synced_at);
+        $this->assertSame('sync_queued', $firstConnection->fresh()->status);
+        $this->assertSame('sync_queued', $secondConnection->fresh()->status);
+        Queue::assertPushed(SyncConnectedGmailStatements::class, 2);
     }
 
     public function test_first_gmail_sync_is_limited_to_30_days_and_older_import_is_explicit(): void
