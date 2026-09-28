@@ -65,7 +65,7 @@ final class GmailStatementConnector
                         $query->where(function ($query): void {
                             $query->where('status', 'unsupported_format')->where('failure_code', 'pdf_not_supported');
                         })->orWhere(function ($query): void {
-                            $query->where('status', 'unsupported_schema')->where('failure_code', 'unsupported_schema')->whereNull('headers');
+                            $query->where('status', 'unsupported_schema')->where('failure_code', 'unsupported_schema');
                         });
                     })->exists();
                 if ($seenMessage && ! $retryablePdf) {
@@ -147,7 +147,7 @@ final class GmailStatementConnector
             $existing = GmailStatementMessage::where('gmail_connection_id', $connection->id)->where('dedupe_fingerprint', $dedupe)->first();
             $retryUnsupportedPdf = $extension === 'pdf'
                 && ($existing?->status === 'unsupported_format' && $existing?->failure_code === 'pdf_not_supported'
-                    || $existing?->status === 'unsupported_schema' && $existing?->failure_code === 'unsupported_schema' && $existing?->headers === null);
+                    || $existing?->status === 'unsupported_schema' && $existing?->failure_code === 'unsupported_schema');
             if ($existing && $existing->status !== 'failed' && ! $retryUnsupportedPdf) {
                 continue;
             }

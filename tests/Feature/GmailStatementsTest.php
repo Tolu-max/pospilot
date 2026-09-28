@@ -336,6 +336,7 @@ class GmailStatementsTest extends TestCase
             'gmail_attachment_id' => $attachmentId,
             'file_name' => 'statement.pdf',
             'file_type' => 'pdf',
+            'headers' => ['Old table extraction'],
             'status' => 'unsupported_schema',
             'failure_code' => 'unsupported_schema',
             'received_at' => now()->subDay(),
