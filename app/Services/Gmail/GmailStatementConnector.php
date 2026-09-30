@@ -65,7 +65,7 @@ final class GmailStatementConnector
                         $query->where(function ($query): void {
                             $query->where('status', 'unsupported_format')->where('failure_code', 'pdf_not_supported');
                         })->orWhere(function ($query): void {
-                            $query->where('status', 'unsupported_schema')->where('failure_code', 'unsupported_schema');
+                            $query->where('status', 'unsupported_schema')->whereIn('failure_code', ['unsupported_schema', 'pdf_no_pos_rows', 'pdf_table_unrecognized']);
                         });
                     })->exists();
                 if ($seenMessage && ! $retryablePdf) {
@@ -147,7 +147,7 @@ final class GmailStatementConnector
             $existing = GmailStatementMessage::where('gmail_connection_id', $connection->id)->where('dedupe_fingerprint', $dedupe)->first();
             $retryUnsupportedPdf = $extension === 'pdf'
                 && ($existing?->status === 'unsupported_format' && $existing?->failure_code === 'pdf_not_supported'
-                    || $existing?->status === 'unsupported_schema' && $existing?->failure_code === 'unsupported_schema');
+                    || $existing?->status === 'unsupported_schema' && in_array($existing?->failure_code, ['unsupported_schema', 'pdf_no_pos_rows', 'pdf_table_unrecognized'], true));
             if ($existing && $existing->status !== 'failed' && ! $retryUnsupportedPdf) {
                 continue;
             }
@@ -206,17 +206,21 @@ final class GmailStatementConnector
 
                     continue;
                 }
+                $activityScope = 'pos_terminal';
                 if ($extension === 'xlsx') {
                     $contents = $this->xlsx->toCsv($contents);
                 } elseif ($extension === 'pdf') {
                     $pages = $this->pdfReader->extractPositionedPages($contents);
-                    $contents = $this->pdfTables->toCsvFromPositionedPages($pages, $provider->slug)['csv'];
+                    $table = $this->pdfTables->toCsvFromPositionedPages($pages, $provider->slug);
+                    $contents = $table['csv'];
+                    $activityScope = $table['activity_scope'];
                 }
                 $schema = $this->imports->inspect($contents);
                 $record->update([
                     'headers' => $schema['headers'],
                     'masked_account_identifier' => $this->imports->maskedAccountHint($contents, $schema['headers']),
                     'status' => 'needs_setup',
+                    'failure_code' => $activityScope === 'personal_wallet' ? 'personal_wallet_statement' : null,
                 ]);
                 $this->imports->retainForMapping($record, $contents);
                 $profile = $this->matchingProfile($record, $schema['fingerprint'], $schema['headers'], $contents);
@@ -228,6 +232,7 @@ final class GmailStatementConnector
                     'pdf_scanned_unsupported' => 'pdf_scanned_unsupported',
                     'pdf_page_limit_exceeded' => 'pdf_page_limit_exceeded',
                     'pdf_parse_failed' => 'pdf_parse_failed',
+                    'pdf_no_pos_rows' => 'pdf_no_pos_rows',
                     'unsupported_schema' => $extension === 'pdf' ? 'pdf_table_unrecognized' : 'unsupported_schema',
                     default => 'unsupported_schema',
                 };
@@ -277,6 +282,10 @@ final class GmailStatementConnector
             $column = $this->imports->identityColumn($profile->column_mapping);
             $index = is_string($column) ? $this->headerIndex($headers, $column) : false;
             if ($index === false) {
+                if (($profile->column_mapping['_activity_scope'] ?? 'pos_terminal') === 'personal_wallet') {
+                    return false;
+                }
+
                 $terminalCount = Terminal::where('agent_profile_id', $profile->agent_profile_id)
                     ->where('provider_id', $profile->provider_id)->where('active', true)->count();
 

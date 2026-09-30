@@ -36,8 +36,11 @@ final class TransactionIngestionService
         }
 
         $terminal = $data->terminalIdentifier ? Terminal::firstOrCreate(['agent_profile_id' => $agent->id, 'provider_id' => $data->provider->id, 'terminal_identifier' => $data->terminalIdentifier], ['name' => 'Imported terminal '.$data->terminalIdentifier]) : null;
-        $calculatedCharge = $this->charges->calculate($agent, $data->amount, $data->provider->id);
-        $customerChargeComponents = collect($data->adjustments)->filter(fn ($component): bool => $component->type->value === 'customer_charge');
+        $isPersonalWalletActivity = ($data->metadata['activity_scope'] ?? null) === 'personal_wallet';
+        $calculatedCharge = $isPersonalWalletActivity ? '0.00' : $this->charges->calculate($agent, $data->amount, $data->provider->id);
+        $customerChargeComponents = $isPersonalWalletActivity
+            ? collect()
+            : collect($data->adjustments)->filter(fn ($component): bool => $component->type->value === 'customer_charge');
         $componentCustomerCharge = $customerChargeComponents->isNotEmpty()
             ? $customerChargeComponents->reduce(fn (string $total, $component): string => Money::add($total, $component->amount), '0.00')
             : null;
@@ -51,7 +54,7 @@ final class TransactionIngestionService
             throw new \InvalidArgumentException('Normalized customer charge does not match its component breakdown.');
         }
 
-        $providedCustomerCharge = $data->customerCharge ?? $componentCustomerCharge;
+        $providedCustomerCharge = $isPersonalWalletActivity ? null : ($data->customerCharge ?? $componentCustomerCharge);
         $defaultChargeSource = match ($componentChargeSource) {
             TransactionAdjustmentSource::Provider => CustomerChargeSource::Imported->value,
             TransactionAdjustmentSource::Manual => CustomerChargeSource::Manual->value,
@@ -59,7 +62,7 @@ final class TransactionIngestionService
             default => $providedCustomerCharge === null ? CustomerChargeSource::Calculated->value : CustomerChargeSource::Imported->value,
         };
         $customerChargeSource = $data->customerChargeSource ?? $defaultChargeSource;
-        $effectiveCharge = $providedCustomerCharge ?? $calculatedCharge;
+        $effectiveCharge = $isPersonalWalletActivity ? '0.00' : ($providedCustomerCharge ?? $calculatedCharge);
         $importedCustomerCharge = $customerChargeSource === CustomerChargeSource::Imported || $customerChargeSource === CustomerChargeSource::Imported->value
             ? $providedCustomerCharge
             : null;
@@ -108,7 +111,7 @@ final class TransactionIngestionService
         $strongReference = $this->strongReference($data, $reference);
 
         if ($strongReference !== null) {
-            return hash('sha256', implode('|', [$data->provider->id, 'ref', $strongReference['type'], $strongReference['value']]));
+            return hash('sha256', implode('|', [$data->provider->id, $data->metadata['activity_scope'] ?? 'pos_terminal', 'ref', $strongReference['type'], $strongReference['value']]));
         }
 
         $hasTerminalScope = $terminalIdentifier !== '';
@@ -198,6 +201,7 @@ final class TransactionIngestionService
             'merchant_id',
             'provider_account_identifier_fingerprint',
             'settlement_reference',
+            'activity_scope',
         ]));
         $sourceReferenceFingerprint = hash('sha256', $this->sourceReference($data) ?: $transactionFingerprint);
         $metadataFingerprint = hash('sha256', json_encode($safeMetadata, JSON_THROW_ON_ERROR));

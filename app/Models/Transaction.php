@@ -6,6 +6,7 @@ use App\Enums\CustomerChargeSource;
 use App\Enums\SettlementStatus;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,6 +21,14 @@ class Transaction extends Model
     protected function casts(): array
     {
         return ['amount' => 'decimal:2', 'customer_charge' => 'decimal:2', 'imported_customer_charge' => 'decimal:2', 'calculated_customer_charge' => 'decimal:2', 'customer_charge_override' => 'decimal:2', 'customer_charge_override_at' => 'datetime', 'customer_charge_source' => CustomerChargeSource::class, 'provider_fee' => 'decimal:2', 'provider_fee_supplied' => 'boolean', 'provider_fee_components_complete' => 'boolean', 'transaction_status' => TransactionStatus::class, 'settlement_status' => SettlementStatus::class, 'source' => TransactionSource::class, 'transaction_at' => 'datetime', 'settled_at' => 'datetime', 'metadata' => 'array'];
+    }
+
+    public function scopePosFinancial(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query->whereNull('metadata->activity_scope')
+                ->orWhere('metadata->activity_scope', '!=', 'personal_wallet');
+        });
     }
 
     public function agentProfile(): BelongsTo

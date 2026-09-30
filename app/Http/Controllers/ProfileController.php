@@ -15,9 +15,64 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Redirect;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProfileController extends Controller
 {
+    public function export(Request $request): StreamedResponse
+    {
+        $agent = $request->user()->businessAgentProfile();
+        abort_unless($agent !== null, 404);
+
+        return response()->streamDownload(function () use ($agent): void {
+            echo '{"business":'.json_encode($agent->only(['business_name', 'country', 'currency', 'location']), JSON_THROW_ON_ERROR);
+
+            $writeRows = function (string $key, iterable $rows, callable $map): void {
+                echo ','.json_encode($key, JSON_THROW_ON_ERROR).':[';
+                $first = true;
+                foreach ($rows as $row) {
+                    if (! $first) {
+                        echo ',';
+                    }
+                    echo json_encode($map($row), JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+                    $first = false;
+                }
+                echo ']';
+            };
+
+            $writeRows('transactions', $agent->transactions()->with(['provider:id,name', 'terminal:id,name'])->orderBy('id')->lazyById(250), fn ($transaction): array => [
+                'provider' => $transaction->provider?->name,
+                'terminal' => $transaction->terminal?->name,
+                'transaction_type' => $transaction->transaction_type,
+                'amount' => $transaction->amount,
+                'customer_charge' => $transaction->customer_charge,
+                'provider_fee' => $transaction->provider_fee_supplied ? $transaction->provider_fee : null,
+                'provider_fee_known' => (bool) $transaction->provider_fee_supplied,
+                'status' => $transaction->transaction_status?->value ?? $transaction->transaction_status,
+                'occurred_at' => $transaction->transaction_at?->toIso8601String(),
+                'source' => $transaction->source?->value ?? $transaction->source,
+            ]);
+            $writeRows('expenses', $agent->expenses()->with('terminal:id,name')->orderBy('id')->lazyById(250), fn ($expense): array => [
+                'terminal' => $expense->terminal?->name,
+                'category' => $expense->category,
+                'amount' => $expense->amount,
+                'date' => $expense->expense_date?->toDateString(),
+            ]);
+            $writeRows('settlements', $agent->settlements()->with(['provider:id,name', 'terminal:id,name'])->orderBy('id')->lazyById(250), fn ($settlement): array => [
+                'provider' => $settlement->provider?->name,
+                'terminal' => $settlement->terminal?->name,
+                'settlement_reference' => $settlement->settlement_reference ? '••••'.substr($settlement->settlement_reference, -4) : null,
+                'expected_amount' => $settlement->expected_amount,
+                'actual_amount' => $settlement->actual_amount,
+                'provider_fee' => $settlement->provider_fee_supplied ? $settlement->provider_fee : null,
+                'provider_fee_known' => (bool) $settlement->provider_fee_supplied,
+                'date' => $settlement->settlement_date?->toDateString(),
+                'status' => $settlement->status?->value ?? $settlement->status,
+            ]);
+            echo '}';
+        }, 'pospilot-business-data-'.now()->toDateString().'.json', ['Content-Type' => 'application/json; charset=UTF-8']);
+    }
+
     /**
      * Display the user's profile form.
      */
@@ -25,6 +80,9 @@ class ProfileController extends Controller
     {
         return Inertia::render('Profile/Edit', [
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
+            'canManageBusiness' => $request->user()->businessRole() === 'owner',
+            'hasPassword' => filled($request->user()->getAuthPassword()),
+            'googleReauthenticationUrl' => $request->user()->google_id ? route('auth.google.reauthenticate') : null,
             'status' => session('status'),
         ]);
     }

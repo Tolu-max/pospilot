@@ -51,7 +51,7 @@ abstract class AbstractSettlementCsvImporter implements SettlementCsvImporter
         $expected = $this->decimal($value('expected_amount'), 'expected amount', $errors, true);
         $actual = $this->decimal($value('actual_amount'), 'actual amount', $errors, true);
         $gross = $this->decimal($value('gross_transaction_amount'), 'gross transaction amount', $errors, true);
-        $fee = $this->decimal($value('provider_fee'), 'provider fee', $errors, true) ?? '0.00';
+        $fee = $this->decimal($value('provider_fee'), 'provider fee', $errors, true);
         if ($expected === null && $actual === null) {
             $errors[] = 'Expected or actual settlement amount is required';
         }

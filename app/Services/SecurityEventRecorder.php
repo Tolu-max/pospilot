@@ -11,10 +11,11 @@ class SecurityEventRecorder
     /** @param array<string, scalar|null> $metadata */
     public function record(?User $user, string $eventType, Request $request, array $metadata = []): void
     {
-        $safeMetadata = array_intersect_key($metadata, array_flip(['method', 'provider', 'revoked_sessions']));
+        $safeMetadata = array_intersect_key($metadata, array_flip(['method', 'provider', 'revoked_sessions', 'role', 'active', 'terminal_count']));
 
         SecurityEvent::query()->create([
             'user_id' => $user?->id,
+            'agent_profile_id' => $user?->businessAgentProfile()?->id,
             'event_type' => $eventType,
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),

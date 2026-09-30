@@ -160,12 +160,19 @@ final class GmailStatementController extends Controller
         abort_unless($agent && $message->agent_profile_id === $agent->id, 404);
         abort_unless($message->status === 'needs_setup', 422, 'This statement is not waiting for setup.');
         $fields = ['external_reference', 'amount', 'customer_charge', 'provider_fee', 'transaction_status', 'transaction_at', 'transaction_type', 'merchant_identifier', 'business_identifier', 'terminal_identifier', 'provider_account_identifier', 'settlement_reference'];
-        $rules = ['terminal_id' => ['required', 'integer']];
+        $rules = [
+            'activity_scope' => ['required', Rule::in(['pos_terminal', 'personal_wallet'])],
+            'terminal_id' => ['nullable', 'required_if:activity_scope,pos_terminal', 'integer'],
+        ];
         foreach ($fields as $field) {
             $rules['column_mapping.'.$field] = ['nullable', 'string', 'max:255'];
         }
         $validated = $request->validate($rules);
-        $profile = $imports->saveMapping($message, (array) ($validated['column_mapping'] ?? []), (int) $validated['terminal_id']);
+        if ($message->failure_code === 'personal_wallet_statement') {
+            abort_unless(($validated['activity_scope'] ?? null) === 'personal_wallet', 422, 'This statement was identified as personal wallet activity and cannot be imported as POS terminal sales.');
+        }
+        abort_unless(($validated['activity_scope'] ?? null) !== 'personal_wallet' || ($message->file_type === 'pdf' && $message->failure_code === 'personal_wallet_statement'), 422, 'Choose personal wallet activity only for a statement POSPilot identified as a personal account statement.');
+        $profile = $imports->saveMapping($message, (array) ($validated['column_mapping'] ?? []), isset($validated['terminal_id']) ? (int) $validated['terminal_id'] : null, $validated['activity_scope']);
         $imports->process($message->fresh(), $profile);
 
         return response()->json([
@@ -189,6 +196,9 @@ final class GmailStatementController extends Controller
             'pdf_scanned_unsupported' => 'pdf_scanned_unsupported',
             'pdf_page_limit_exceeded' => 'pdf_page_limit_exceeded',
             'pdf_parse_failed' => 'pdf_parse_failed',
+            'pdf_no_pos_rows' => 'pdf_no_pos_rows',
+            'personal_wallet_statement' => 'personal_wallet_statement',
+            'pdf_table_unrecognized' => 'unsupported_schema',
             'duplicate_attachment' => 'duplicate_attachment',
             'attachment_read_failed' => 'attachment_read_failed',
             'invalid_headers' => 'unsupported_schema',

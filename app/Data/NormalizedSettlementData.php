@@ -18,7 +18,7 @@ final readonly class NormalizedSettlementData
         public ?string $terminalIdentifier,
         public CarbonImmutable $settlementDate,
         public ?string $grossTransactionAmount,
-        public string $providerFee,
+        public ?string $providerFee,
         public ?string $expectedAmount,
         public ?string $actualAmount,
         public SettlementStatus $status,
@@ -36,7 +36,7 @@ final readonly class NormalizedSettlementData
         $expected = self::decimalOrNull($data['expected_amount'] ?? null, 'expected amount');
         $actual = self::decimalOrNull($data['actual_amount'] ?? null, 'actual amount');
         $gross = self::decimalOrNull($data['gross_transaction_amount'] ?? $data['gross_amount'] ?? null, 'gross transaction amount');
-        $fee = self::decimalOrNull($data['provider_fee'] ?? '0.00', 'provider fee') ?? '0.00';
+        $fee = self::decimalOrNull($data['provider_fee'] ?? null, 'provider fee');
         if ($expected === null && $actual === null) {
             throw new InvalidArgumentException('Normalized settlement requires expected or actual amount.');
         }

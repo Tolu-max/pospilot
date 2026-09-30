@@ -20,6 +20,7 @@ class PasswordUpdateTest extends TestCase
 
         $response = $this
             ->actingAs($user)
+            ->withSession(['auth.password_confirmed_at' => time()])
             ->from('/profile')
             ->put('/password', [
                 'current_password' => 'password',
@@ -41,6 +42,7 @@ class PasswordUpdateTest extends TestCase
 
         $response = $this
             ->actingAs($user)
+            ->withSession(['auth.password_confirmed_at' => time()])
             ->from('/profile')
             ->put('/password', [
                 'current_password' => 'wrong-password',
@@ -51,5 +53,19 @@ class PasswordUpdateTest extends TestCase
         $response
             ->assertSessionHasErrors('current_password')
             ->assertRedirect('/profile');
+    }
+
+    public function test_google_only_user_can_set_a_password_after_recent_reauthentication(): void
+    {
+        $user = User::factory()->create(['password' => null, 'google_id' => 'google-test-identity']);
+        Notification::fake();
+
+        $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])->from('/profile')->put('/password', [
+            'password' => 'new-password',
+            'password_confirmation' => 'new-password',
+        ])->assertRedirect('/profile')->assertSessionHasNoErrors();
+
+        $this->assertTrue(Hash::check('new-password', $user->refresh()->password));
+        Notification::assertSentTo($user, SecurityAlertNotification::class);
     }
 }

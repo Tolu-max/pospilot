@@ -14,6 +14,7 @@ const statusLabels = {
     needs_setup_expired: 'Setup expired', unsupported_format: 'Could not read this PDF',
     pdf_scanned_unsupported: 'Scanned PDF not supported', pdf_page_limit_exceeded: 'PDF is too long to process',
     pdf_parse_failed: 'PDF could not be read', unsupported_schema: 'Statement format needs setup',
+    pdf_no_pos_rows: 'No POS terminal activity identified', personal_wallet_statement: 'Personal wallet statement',
     rejected: 'Attachment too large', failed: 'Could not process statement', duplicate_attachment: 'Duplicate statement attachment',
 };
 
@@ -105,10 +106,14 @@ export default function ProviderAutomation() {
 
     async function saveMapping(message) {
         const form = mappings[message.id] || {};
+        const activityScope = message.failure_code === 'personal_wallet_statement' ? 'personal_wallet' : (form.activity_scope || 'pos_terminal');
+        const columnMapping = { ...(form.column_mapping || {}) };
+        const defaults = { external_reference: 'Transaction Reference', amount: 'Amount', transaction_at: 'Date', transaction_status: 'Status', transaction_type: 'Transaction Type', provider_account_identifier: 'Provider Account Identifier' };
+        Object.entries(defaults).forEach(([field, header]) => { if (!columnMapping[field] && (message.headers || []).includes(header)) columnMapping[field] = header; });
         setBusy(true); setError(null); setNotice(null);
         try {
             const result = await api(`/api/gmail/statements/${message.id}/mapping`, {
-                method: 'POST', body: { terminal_id: form.terminal_id, column_mapping: form.column_mapping || {} },
+                method: 'POST', body: { activity_scope: activityScope, terminal_id: activityScope === 'pos_terminal' ? form.terminal_id : null, column_mapping: columnMapping },
             });
             if (result.status === 'processed' && result.rows_imported > 0) trackSafeEvent('statement_imported');
             setNotice('Statement mapping saved and processed.');
@@ -123,7 +128,9 @@ export default function ProviderAutomation() {
     const setRule = (slug, value) => setRules((current) => ({ ...current, [slug]: { ...(current[slug] || {}), sender_email: value } }));
     const setMapping = (id, field, value) => setMappings((current) => ({
         ...current,
-        [id]: { ...(current[id] || {}), column_mapping: { ...(current[id]?.column_mapping || {}), [field]: value } },
+        [id]: field === '_activity_scope'
+            ? { ...(current[id] || {}), activity_scope: value }
+            : { ...(current[id] || {}), column_mapping: { ...(current[id]?.column_mapping || {}), [field]: value } },
     }));
     const savedProviders = status?.selected_provider_slugs || [];
     const rulesPersisted = selected.length > 0 && selected.length === savedProviders.length && selected.every((slug) => savedProviders.includes(slug)
@@ -204,6 +211,7 @@ export default function ProviderAutomation() {
 }
 
 function StatementItem({ message, terminals, mapping, setMapping, save, busy }) {
+    const activityScope = message.failure_code === 'personal_wallet_statement' ? 'personal_wallet' : (mapping.activity_scope || 'pos_terminal');
     const fields = [
         ['amount', 'Amount', true], ['transaction_at', 'Date and time', true], ['transaction_status', 'Status', true],
         ['external_reference', 'Transaction reference', false], ['provider_fee', 'Provider fee', false], ['customer_charge', 'Customer charge', false],
@@ -216,12 +224,22 @@ function StatementItem({ message, terminals, mapping, setMapping, save, busy }) 
         {message.status === 'needs_setup' && <p className="mt-2 text-sm text-slate-700">We found a {message.provider?.name || 'provider'} statement that needs setup.{message.masked_account_identifier ? ` Account: ${message.masked_account_identifier}` : ' We could not confidently match its account or terminal.'}</p>}
         {message.status === 'duplicate_attachment' && <p className="mt-2 text-sm text-slate-600">This file matches a statement already checked. POSPilot did not import it again.</p>}
         {message.failure_code === 'pdf_scanned_unsupported' && <p className="mt-2 text-sm text-slate-600">This PDF contains no extractable text, so POSPilot cannot safely read its transactions yet.</p>}
-        {message.status === 'unsupported_schema' && <p className="mt-2 text-sm text-slate-600">POSPilot could not recognize the table layout. No transactions were imported.</p>}
+        {message.failure_code === 'personal_wallet_statement' && <p className="mt-2 text-sm text-slate-600">This PDF contains personal wallet activity. You can import it for testing; it will appear in Transactions but stay out of POS earnings, settlement reconciliation, and daily closing.</p>}
+        {message.failure_code === 'pdf_no_pos_rows' && <p className="mt-2 text-sm text-slate-600">The PDF is readable, but it does not identify transactions as POS terminal activity. No transactions were imported.</p>}
+        {message.status === 'unsupported_schema' && message.failure_code !== 'pdf_no_pos_rows' && <p className="mt-2 text-sm text-slate-600">POSPilot could not recognize the table layout. No transactions were imported.</p>}
         {message.can_map && <div className="mt-4 space-y-4">
-            {terminals.length ? <div><p className="text-sm font-bold">Choose the POS terminal for this statement</p><select aria-label="Destination terminal" className="mt-2 w-full rounded-xl border border-slate-300 p-3" value={mapping.terminal_id || ''} onChange={(event) => setMapping('terminal_id', event.target.value)}><option value="">Select terminal</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}{terminal.terminal_identifier ? ` · ${terminal.terminal_identifier}` : ''}</option>)}</select></div> : <p className="text-sm text-slate-700">Add this provider’s POS terminal before importing. <Link href="/dashboard?screen=setup" className="font-bold text-brand-accent">Add terminal</Link></p>}
+            {message.failure_code === 'personal_wallet_statement' && <Notice tone="info">Personal wallet activity stays separate from POS terminal sales, customer charges, earnings, settlement reconciliation, and daily closing.</Notice>}
+            {activityScope === 'pos_terminal' && (terminals.length ? <div><p className="text-sm font-bold">Choose the POS terminal for this statement</p><select aria-label="Destination terminal" className="mt-2 w-full rounded-xl border border-slate-300 p-3" value={mapping.terminal_id || ''} onChange={(event) => setMapping('terminal_id', event.target.value)}><option value="">Select terminal</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}{terminal.terminal_identifier ? ` · ${terminal.terminal_identifier}` : ''}</option>)}</select></div> : <p className="text-sm text-slate-700">Add this provider’s POS terminal before importing. <Link href="/dashboard?screen=setup" className="font-bold text-brand-accent">Add terminal</Link></p>)}
             <p className="text-sm leading-5 text-slate-600">Match the statement headings to each field. POSPilot does not show statement rows here.</p>
-            <div className="grid gap-3 sm:grid-cols-2">{fields.map(([field, label, required]) => <label key={field} className="block text-sm font-semibold">{label}{required ? ' *' : ' (optional)'}<select aria-label={`${label} column`} className="mt-1 w-full rounded-xl border border-slate-300 p-3" required={required} value={mapping.column_mapping?.[field] || ''} onChange={(event) => setMapping(field, event.target.value)}><option value="">Do not map</option>{(message.headers || []).map((header, index) => <option key={`${header}-${index}`} value={header}>{header || `Column ${index + 1}`}</option>)}</select></label>)}</div>
-            <Button type="button" disabled={busy || !mapping.terminal_id || !mapping.column_mapping?.amount || !mapping.column_mapping?.transaction_at || !mapping.column_mapping?.transaction_status} onClick={save}>Save mapping and import</Button>
+            <div className="grid gap-3 sm:grid-cols-2">{fields.map(([field, label, required]) => {
+                const accountRequired = activityScope === 'personal_wallet' && field === 'provider_account_identifier';
+                const requiredField = required || accountRequired;
+                const suggestedHeaders = { external_reference: 'Transaction Reference', amount: 'Amount', transaction_at: 'Date', transaction_status: 'Status', transaction_type: 'Transaction Type', provider_account_identifier: 'Provider Account Identifier' };
+                const suggestion = suggestedHeaders[field];
+                const value = mapping.column_mapping?.[field] || ((message.headers || []).includes(suggestion) ? suggestion : '');
+                return <label key={field} className="block text-sm font-semibold">{label}{requiredField ? ' *' : ' (optional)'}<select aria-label={`${label} column`} className="mt-1 w-full rounded-xl border border-slate-300 p-3" required={requiredField} value={value} onChange={(event) => setMapping(field, event.target.value)}><option value="">Do not map</option>{(message.headers || []).map((header, index) => <option key={`${header}-${index}`} value={header}>{header || `Column ${index + 1}`}</option>)}</select></label>;
+            })}</div>
+            <Button type="button" disabled={busy || (activityScope === 'pos_terminal' && !mapping.terminal_id) || (!mapping.column_mapping?.amount && !(message.headers || []).includes('Amount')) || (!mapping.column_mapping?.transaction_at && !(message.headers || []).includes('Date')) || (!mapping.column_mapping?.transaction_status && !(message.headers || []).includes('Status')) || (activityScope === 'personal_wallet' && !mapping.column_mapping?.provider_account_identifier && !(message.headers || []).includes('Provider Account Identifier'))} onClick={save}>{activityScope === 'personal_wallet' ? 'Import wallet activity' : 'Save mapping and import'}</Button>
         </div>}
     </article>;
 }

@@ -17,7 +17,7 @@ final class ReconciliationService
 
     public function expectedSettlementFor(AgentProfile $agent, int $providerId, ?int $terminalId = null, ?string $date = null): string
     {
-        $query = $agent->transactions()->where('provider_id', $providerId)->where('transaction_status', TransactionStatus::Successful->value);
+        $query = $agent->transactions()->posFinancial()->where('provider_id', $providerId)->where('transaction_status', TransactionStatus::Successful->value);
         if ($terminalId) {
             $query->where('terminal_id', $terminalId);
         }
@@ -36,9 +36,9 @@ final class ReconciliationService
     {
         $expected = $settlement->expected_amount !== null ? (string) $settlement->expected_amount : $this->expectedSettlementFor($settlement->agentProfile, $settlement->provider_id, $settlement->terminal_id, $settlement->settlement_date?->toDateString());
         $actual = $settlement->actual_amount === null ? null : (string) $settlement->actual_amount;
-        $transactions = $settlement->agentProfile->transactions()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Successful->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->get();
-        $pending = $settlement->agentProfile->transactions()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Pending->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->count();
-        $reversed = $settlement->agentProfile->transactions()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Reversed->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->count();
+        $transactions = $settlement->agentProfile->transactions()->posFinancial()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Successful->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->get();
+        $pending = $settlement->agentProfile->transactions()->posFinancial()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Pending->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->count();
+        $reversed = $settlement->agentProfile->transactions()->posFinancial()->where('provider_id', $settlement->provider_id)->where('transaction_status', TransactionStatus::Reversed->value)->whereDate('transaction_at', $settlement->settlement_date)->when($settlement->terminal_id, fn ($q) => $q->where('terminal_id', $settlement->terminal_id))->count();
         $discrepancy = $actual === null ? null : Money::subtract($actual, $expected);
         $issues = [];
         if ($actual === null) {
@@ -64,16 +64,65 @@ final class ReconciliationService
         $issues = [];
         foreach ($settlements as $settlement) {
             foreach ($this->compare($settlement)['issues'] as $issue) {
-                $issues[] = [...$issue, 'settlement_id' => $settlement->id, 'provider' => $settlement->provider->name, 'settlement_date' => $settlement->settlement_date->toDateString()];
+                $issues[] = [
+                    ...$issue,
+                    'settlement_id' => $settlement->id,
+                    'provider' => $settlement->provider->name,
+                    'terminal' => $settlement->terminal?->name ?? 'All terminals',
+                    'reference' => $settlement->settlement_reference ? '••••'.substr($settlement->settlement_reference, -4) : null,
+                    'settlement_date' => $settlement->settlement_date->toDateString(),
+                    'issue_age_days' => max(0, (int) $settlement->settlement_date->diffInDays(today())),
+                    'lifecycle_status' => $settlement->status === SettlementStatus::Disputed ? 'disputed' : ($settlement->actual_amount === null ? 'pending' : 'needs_review'),
+                ];
             }
         }
-        $transactions = $agent->transactions()->where('transaction_status', TransactionStatus::Successful->value)->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
+        $transactions = $agent->transactions()->posFinancial()->where('transaction_status', TransactionStatus::Successful->value)->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
         foreach ($transactions->groupBy(fn ($transaction) => implode('|', [$transaction->provider_id, $transaction->terminal_id ?? 'none', $transaction->transaction_at->toDateString()])) as $group) {
             $first = $group->first();
             $hasSettlement = $settlements->contains(fn ($settlement) => $settlement->provider_id === $first->provider_id && $settlement->terminal_id === $first->terminal_id && $settlement->settlement_date->toDateString() === $first->transaction_at->toDateString());
             if (! $hasSettlement) {
-                $issues[] = ['type' => ReconciliationIssueType::MissingSettlement->value, 'message' => 'Successful transactions have no matching settlement.', 'settlement_id' => null, 'provider' => $first->provider->name, 'settlement_date' => $first->transaction_at->toDateString(), 'expected_amount' => $this->expectedSettlementFor($agent, $first->provider_id, $first->terminal_id, $first->transaction_at->toDateString())];
+                $issues[] = ['type' => ReconciliationIssueType::MissingSettlement->value, 'message' => 'Successful transactions have no matching settlement.', 'settlement_id' => null, 'provider' => $first->provider->name, 'terminal' => $first->terminal?->name ?? 'Terminal not mapped', 'settlement_date' => $first->transaction_at->toDateString(), 'issue_age_days' => max(0, (int) $first->transaction_at->startOfDay()->diffInDays(today())), 'lifecycle_status' => 'pending', 'transaction_count' => $group->count(), 'expected_amount' => $this->expectedSettlementFor($agent, $first->provider_id, $first->terminal_id, $first->transaction_at->toDateString())];
             }
+        }
+        $openTransactionStates = $agent->transactions()
+            ->posFinancial()
+            ->with(['provider', 'terminal'])
+            ->whereIn('transaction_status', [TransactionStatus::Pending->value, TransactionStatus::Reversed->value])
+            ->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))
+            ->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))
+            ->get()
+            ->groupBy(fn ($transaction) => implode('|', [
+                $transaction->provider_id,
+                $transaction->terminal_id ?? 'none',
+                $transaction->transaction_at->toDateString(),
+                $transaction->transaction_status->value,
+            ]));
+        foreach ($openTransactionStates as $group) {
+            $first = $group->first();
+            $hasMatchingSettlement = $settlements->contains(fn (Settlement $settlement): bool => $settlement->provider_id === $first->provider_id
+                && $settlement->settlement_date->toDateString() === $first->transaction_at->toDateString()
+                && ($settlement->terminal_id === null || $settlement->terminal_id === $first->terminal_id));
+            if ($hasMatchingSettlement) {
+                continue;
+            }
+
+            $isReversed = $first->transaction_status === TransactionStatus::Reversed;
+            $amount = $group->reduce(fn (string $total, $transaction): string => Money::add($total, $transaction->amount), '0.00');
+            $issues[] = [
+                'type' => $isReversed ? ReconciliationIssueType::ReversedTransaction->value : ReconciliationIssueType::TransactionPending->value,
+                'message' => $isReversed
+                    ? 'Reversed transactions need a settlement review.'
+                    : 'Pending transactions need a settlement review.',
+                'settlement_id' => null,
+                'provider' => $first->provider->name,
+                'terminal' => $first->terminal?->name ?? 'Terminal not mapped',
+                'reference' => $first->external_reference ? '••••'.substr($first->external_reference, -4) : null,
+                'settlement_date' => $first->transaction_at->toDateString(),
+                'issue_age_days' => max(0, (int) $first->transaction_at->startOfDay()->diffInDays(today())),
+                'lifecycle_status' => $isReversed ? 'reversed' : 'pending',
+                'transaction_count' => $group->count(),
+                'amount' => $amount,
+            ];
         }
 
         return $issues;

@@ -91,7 +91,7 @@ final class GmailStatementImportService
         $message->update(['temporary_file_path' => $path]);
     }
 
-    public function saveMapping(GmailStatementMessage $message, array $mapping, int $terminalId): StatementMappingProfile
+    public function saveMapping(GmailStatementMessage $message, array $mapping, ?int $terminalId, string $activityScope = 'pos_terminal'): StatementMappingProfile
     {
         abort_unless($message->temporary_file_path, 422, 'This statement is no longer available. Wait for the next statement email.');
         $contents = Crypt::decryptString(Storage::disk('local')->get($message->temporary_file_path));
@@ -102,7 +102,11 @@ final class GmailStatementImportService
             throw new RuntimeException('unsupported_schema');
         }
         $headers = array_map(fn (mixed $header): string => trim((string) $header), $headers);
-        $columnNames = array_filter($mapping, fn (mixed $name): bool => is_string($name) && $name !== '');
+        abort_unless(in_array($activityScope, ['pos_terminal', 'personal_wallet'], true), 422, 'Choose a supported statement activity type.');
+        abort_unless($activityScope !== 'personal_wallet' || $message->file_type === 'pdf', 422, 'Personal wallet activity is only supported for verified PDF statement layouts.');
+        abort_unless($message->failure_code !== 'personal_wallet_statement' || $activityScope === 'personal_wallet', 422, 'This statement was identified as personal wallet activity and cannot be imported as POS terminal sales.');
+        $mapping['_activity_scope'] = $activityScope;
+        $columnNames = array_filter(array_diff_key($mapping, ['_activity_scope' => true]), fn (mixed $name): bool => is_string($name) && $name !== '');
         foreach ($columnNames as $name) {
             abort_unless(in_array($name, $headers, true), 422, 'Choose a column from this statement.');
         }
@@ -112,13 +116,17 @@ final class GmailStatementImportService
         foreach (['amount', 'transaction_at', 'transaction_status'] as $required) {
             abort_unless(isset($mapping[$required]), 422, 'Map amount, date/time, and status before continuing.');
         }
-        $terminal = Terminal::where('agent_profile_id', $message->agent_profile_id)->where('provider_id', $message->provider_id)->where('active', true)->findOrFail($terminalId);
+        abort_unless($activityScope !== 'pos_terminal' || $terminalId !== null, 422, 'Choose the POS terminal for this statement.');
+        $terminal = $activityScope === 'pos_terminal'
+            ? Terminal::where('agent_profile_id', $message->agent_profile_id)->where('provider_id', $message->provider_id)->where('active', true)->findOrFail($terminalId)
+            : null;
 
         $accountFingerprint = null;
         $maskedAccount = null;
         $identityColumn = $this->identityColumn($mapping);
+        abort_unless($activityScope !== 'personal_wallet' || filled($mapping['provider_account_identifier'] ?? null), 422, 'Map the provider account identifier so personal activity stays scoped to this wallet.');
         $configuredTerminals = Terminal::where('agent_profile_id', $message->agent_profile_id)->where('provider_id', $message->provider_id)->where('active', true)->count();
-        if ($configuredTerminals > 1) {
+        if ($activityScope === 'pos_terminal' && $configuredTerminals > 1) {
             abort_unless($this->identityColumn($mapping) !== null, 422, 'Map a merchant, business, terminal, or provider account identifier because this provider has multiple active terminals.');
         }
         if (is_string($identityColumn) && $identityColumn !== '') {
@@ -132,14 +140,13 @@ final class GmailStatementImportService
             }
             abort_unless(count($identifiers) === 1, 422, 'This statement must contain exactly one account identifier to save a reusable account match.');
             $identifier = (string) array_key_first($identifiers);
-            if ($identityColumn === ($mapping['terminal_identifier'] ?? null) && $terminal->terminal_identifier !== null) {
+            if ($identityColumn === ($mapping['terminal_identifier'] ?? null) && $terminal?->terminal_identifier !== null) {
                 abort_unless(hash_equals(hash('sha256', strtolower(trim($terminal->terminal_identifier))), hash('sha256', strtolower($identifier))), 422, 'The statement identifier does not match the selected terminal.');
             }
             $accountFingerprint = hash_hmac('sha256', strtolower($identifier), (string) config('app.key'));
             $maskedAccount = str_repeat('•', 4).substr(preg_replace('/\D/', '', $identifier) ?: $identifier, -4);
         } else {
-            $configuredTerminals = Terminal::where('agent_profile_id', $message->agent_profile_id)->where('provider_id', $message->provider_id)->where('active', true)->count();
-            abort_unless($configuredTerminals <= 1, 422, 'Map an account or terminal identifier column because this provider has multiple terminals.');
+            abort_unless($activityScope === 'personal_wallet' || $configuredTerminals <= 1, 422, 'Map an account or terminal identifier column because this provider has multiple terminals.');
         }
         fclose($handle);
 
@@ -149,7 +156,7 @@ final class GmailStatementImportService
             'schema_fingerprint' => $this->schemaFingerprint($headers),
             'match_identifier_fingerprint' => $accountFingerprint,
         ], [
-            'terminal_id' => $terminal->id,
+            'terminal_id' => $terminal?->id,
             'file_type' => $message->file_type,
             'masked_match_identifier' => $maskedAccount,
             'column_mapping' => $mapping,
@@ -164,8 +171,9 @@ final class GmailStatementImportService
 
             return;
         }
+        $activityScope = $profile->column_mapping['_activity_scope'] ?? 'pos_terminal';
         $terminal = $profile->terminal;
-        if (! $terminal || ! $terminal->active || $terminal->agent_profile_id !== $message->agent_profile_id || $terminal->provider_id !== $message->provider_id) {
+        if ($activityScope === 'pos_terminal' && (! $terminal || ! $terminal->active || $terminal->agent_profile_id !== $message->agent_profile_id || $terminal->provider_id !== $message->provider_id)) {
             $message->update(['status' => 'needs_setup', 'failure_code' => 'terminal_mapping_invalid']);
 
             return;
@@ -213,7 +221,7 @@ final class GmailStatementImportService
         }
         fclose($handle);
 
-        $batch = DB::transaction(function () use ($message, $profile, $rows): ImportBatch {
+        $batch = DB::transaction(function () use ($message, $profile, $rows, $activityScope): ImportBatch {
             $batch = ImportBatch::create([
                 'agent_profile_id' => $message->agent_profile_id,
                 'provider_id' => $message->provider_id,
@@ -231,13 +239,35 @@ final class GmailStatementImportService
                     continue;
                 }
                 $data = $row['normalized_data'];
-                $data = NormalizedTransactionData::fromArray($message->provider, [
+                $normalized = [
                     ...$data->toArray(),
                     'source' => TransactionSource::Statement->value,
                     'terminal_identifier' => $profile->terminal?->terminal_identifier,
                     'provider_fee_supplied' => $data->providerFeeSupplied,
-                    'metadata' => ['statement_source' => 'gmail', 'provider_fee_supplied' => $data->providerFeeSupplied],
-                ]);
+                    'metadata' => [
+                        'statement_source' => 'gmail',
+                        'provider_fee_supplied' => $data->providerFeeSupplied,
+                        ...($profile->match_identifier_fingerprint !== null ? ['provider_account_identifier_fingerprint' => $profile->match_identifier_fingerprint] : []),
+                    ],
+                ];
+                if ($activityScope === 'personal_wallet') {
+                    $normalized['terminal_identifier'] = null;
+                    $normalized['transaction_type'] = str_starts_with($data->transactionType, 'pos_')
+                        ? str_replace('pos_', 'wallet_', $data->transactionType)
+                        : $data->transactionType;
+                    $normalized['customer_charge'] = null;
+                    $normalized['provider_fee'] = null;
+                    $normalized['provider_fee_supplied'] = false;
+                    $normalized['provider_fee_components_complete'] = false;
+                    $normalized['adjustments'] = [];
+                    $normalized['metadata'] = [
+                        'statement_source' => 'gmail',
+                        'activity_scope' => 'personal_wallet',
+                        'provider_fee_supplied' => false,
+                        ...($profile->match_identifier_fingerprint !== null ? ['provider_account_identifier_fingerprint' => $profile->match_identifier_fingerprint] : []),
+                    ];
+                }
+                $data = NormalizedTransactionData::fromArray($message->provider, $normalized);
                 $result = $this->ingestion->ingest($message->connection->agentProfile, $data, $batch->id);
                 $result['status'] === 'duplicate' ? $duplicates++ : $imported++;
             }

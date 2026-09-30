@@ -62,7 +62,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
 
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store'])->middleware('throttle:6,1');
 
-    Route::put('password', [PasswordController::class, 'update'])->middleware('throttle:6,1')->name('password.update');
+    Route::put('password', [PasswordController::class, 'update'])->middleware(['password.confirm', 'throttle:6,1'])->name('password.update');
 
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');

@@ -54,6 +54,27 @@ class GmailPdfStatementReaderTest extends TestCase
         $this->assertSame('0123456789', $rows[0][5]);
     }
 
+    public function test_opay_account_activity_without_pos_identifiers_is_classified_as_personal_wallet_activity(): void
+    {
+        $pdf = $this->positionedPdf([
+            [80, 740, 'Account Number'], [180, 740, '0123456789'],
+            [50, 700, 'Trans. Time'], [120, 700, 'Value Date'], [185, 700, 'Description'], [250, 700, 'Debit (NGN)'],
+            [300, 700, 'Credit (NGN)'], [340, 706, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
+            [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, 'Wallet withdrawal'], [250, 680, '5,000.00'],
+            [300, 680, '-'], [340, 680, '12,000.00'], [390, 680, 'Wallet'], [455, 680, 'OP-TEST-REF-2001'],
+        ]);
+        $pages = (new GmailPdfStatementReader)->extractPositionedPages($pdf);
+        $table = (new PdfStatementTableReader)->toCsvFromPositionedPages($pages, 'opay');
+        $rows = array_map('str_getcsv', array_slice(explode("\n", trim($table['csv'])), 1));
+
+        $this->assertSame('personal_wallet', $table['activity_scope']);
+        $this->assertSame(1, $table['rows']);
+        $this->assertSame('OP-TEST-REF-2001', $rows[0][0]);
+        $this->assertSame('5000.00', $rows[0][1]);
+        $this->assertSame('wallet_debit', $rows[0][4]);
+        $this->assertSame('0123456789', $rows[0][5]);
+    }
+
     public function test_palmpay_positioned_statement_normalizes_money_in_and_skips_non_pos_rows(): void
     {
         $pdf = $this->positionedPdf([
@@ -75,6 +96,23 @@ class GmailPdfStatementReaderTest extends TestCase
         $this->assertSame('2026-09-28 10:30:00', CarbonImmutable::parse($rows[0][2])->format('Y-m-d H:i:s'));
         $this->assertSame('successful', $rows[0][3]);
         $this->assertSame('pos_credit', $rows[0][4]);
+    }
+
+    public function test_palmpay_signed_money_out_is_normalized_as_a_positive_pos_debit(): void
+    {
+        $pdf = $this->positionedPdf([
+            [25, 700, 'Transaction Date'], [135, 700, 'Transaction Detail'], [250, 700, 'Money In (NGN)'],
+            [370, 700, 'Money Out (NGN)'], [475, 700, 'Transaction ID'],
+            [25, 680, '28/09/2026 10:30:00 AM'], [135, 680, 'POS Terminal Withdrawal'], [250, 680, '-'],
+            [370, 680, '-5,000.00'], [475, 680, 'PP-TEST-REF-2002'],
+        ]);
+        $pages = (new GmailPdfStatementReader)->extractPositionedPages($pdf);
+        $table = (new PdfStatementTableReader)->toCsvFromPositionedPages($pages, 'palmpay');
+        $rows = array_map('str_getcsv', array_slice(explode("\n", trim($table['csv'])), 1));
+
+        $this->assertSame(1, $table['rows']);
+        $this->assertSame('5000.00', $rows[0][1]);
+        $this->assertSame('pos_debit', $rows[0][4]);
     }
 
     public function test_statement_row_with_both_money_directions_is_not_imported(): void

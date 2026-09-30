@@ -3,6 +3,7 @@
 use App\Http\Controllers\AccountSessionController;
 use App\Http\Controllers\AgentOperationsController;
 use App\Http\Controllers\BusinessInsightController;
+use App\Http\Controllers\BusinessNotificationPreferenceController;
 use App\Http\Controllers\DailyClosingController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FinancialReportController;
@@ -40,15 +41,28 @@ Route::post('/team/invitations/{token}/accept', [TeamInvitationController::class
 Route::middleware(['auth', 'auth.session', 'verified'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->middleware('business-role:owner,manager,attendant')->name('dashboard');
 
+    Route::middleware('business-role:owner,manager,attendant')->group(function (): void {
+        Route::get('/profile', [ProfileController::class, 'edit'])->middleware(EnsureOnboardingComplete::class)->name('profile.edit');
+        Route::patch('/profile', [ProfileController::class, 'update'])->middleware([EnsureOnboardingComplete::class, 'password.confirm', 'throttle:10,1'])->name('profile.update');
+        Route::delete('/profile', [ProfileController::class, 'destroy'])->middleware([EnsureOnboardingComplete::class, 'password.confirm', 'throttle:5,1'])->name('profile.destroy');
+        Route::get('/api/security/sessions', [AccountSessionController::class, 'index'])->name('api.security.sessions.index');
+        Route::delete('/api/security/sessions/others', [AccountSessionController::class, 'destroyOthers'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.security.sessions.others.destroy');
+        Route::delete('/api/security/sessions/{session}', [AccountSessionController::class, 'destroy'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.security.sessions.destroy');
+    });
+
     Route::middleware('business-role:owner')->group(function (): void {
         Route::get('/team', [TeamController::class, 'index'])->middleware(EnsureOnboardingComplete::class)->name('team.index');
+        Route::get('/api/team/security-activity', [TeamController::class, 'securityActivity'])->middleware(EnsureOnboardingComplete::class)->name('api.team.security-activity');
         Route::get('/api/agent/profile', [AgentOperationsController::class, 'profile'])->name('api.agent.profile');
         Route::patch('/api/agent/profile', [AgentOperationsController::class, 'updateProfile'])->name('api.agent.profile.update');
+        Route::get('/api/account/export', [ProfileController::class, 'export'])->middleware(['password.confirm', 'throttle:3,1'])->name('api.account.export');
 
         Route::middleware(EnsureOnboardingComplete::class)->group(function (): void {
-            Route::get('/integrations/gmail/connect', [GmailOAuthController::class, 'connect'])->name('gmail.connect');
+            Route::get('/api/notification-preferences', [BusinessNotificationPreferenceController::class, 'show'])->name('api.notification-preferences.show');
+            Route::put('/api/notification-preferences', [BusinessNotificationPreferenceController::class, 'update'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.notification-preferences.update');
+            Route::get('/integrations/gmail/connect', [GmailOAuthController::class, 'connect'])->middleware(['password.confirm', 'throttle:10,1'])->name('gmail.connect');
             Route::get('/integrations/gmail/callback', [GmailOAuthController::class, 'callback'])->name('gmail.callback');
-            Route::delete('/integrations/gmail', [GmailOAuthController::class, 'disconnect'])->name('gmail.disconnect');
+            Route::delete('/integrations/gmail', [GmailOAuthController::class, 'disconnect'])->middleware(['password.confirm', 'throttle:10,1'])->name('gmail.disconnect');
             Route::get('/api/gmail/connection', [GmailStatementController::class, 'status'])->name('gmail.connection');
             Route::put('/api/gmail/connection/rules', [GmailStatementController::class, 'saveRules'])->name('gmail.rules.update');
             Route::post('/integrations/gmail/sync', [GmailStatementController::class, 'sync'])->middleware('throttle:3,1')->name('gmail.sync');
@@ -71,10 +85,10 @@ Route::middleware(['auth', 'auth.session', 'verified'])->group(function (): void
             Route::delete('/api/charge-rules/{chargeRule}', [AgentOperationsController::class, 'deleteChargeRule'])->name('api.charge-rules.destroy');
             Route::get('/api/charge-rules/preview', [AgentOperationsController::class, 'previewCharge'])->middleware('throttle:60,1')->name('api.charge-rules.preview');
             Route::get('/api/team/members', [TeamController::class, 'members'])->name('api.team.members');
-            Route::post('/api/team/invitations', [TeamController::class, 'invite'])->middleware('throttle:10,1')->name('api.team.invitations.store');
-            Route::delete('/api/team/invitations/{invitation}', [TeamController::class, 'revokeInvitation'])->name('api.team.invitations.destroy');
-            Route::patch('/api/team/members/{member}', [TeamController::class, 'updateMember'])->name('api.team.members.update');
-            Route::put('/api/team/members/{member}/terminals', [TeamController::class, 'assignTerminals'])->name('api.team.members.terminals');
+            Route::post('/api/team/invitations', [TeamController::class, 'invite'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.team.invitations.store');
+            Route::delete('/api/team/invitations/{invitation}', [TeamController::class, 'revokeInvitation'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.team.invitations.destroy');
+            Route::patch('/api/team/members/{member}', [TeamController::class, 'updateMember'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.team.members.update');
+            Route::put('/api/team/members/{member}/terminals', [TeamController::class, 'assignTerminals'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.team.members.terminals');
         });
     });
 
@@ -111,13 +125,9 @@ Route::middleware(['auth', 'auth.session', 'verified'])->group(function (): void
     Route::middleware(['business-role:owner', EnsureOnboardingComplete::class])->group(function (): void {
         Route::get('/api/financial-summary', [FinancialReportController::class, 'summary'])->name('api.financial-summary');
         Route::get('/api/provider-breakdown', [FinancialReportController::class, 'providerBreakdown'])->name('api.provider-breakdown');
+        Route::get('/api/terminal-profitability', [FinancialReportController::class, 'terminalProfitability'])->name('api.terminal-profitability');
         Route::get('/api/imports', [AgentOperationsController::class, 'importHistory'])->name('api.imports.index');
         Route::get('/api/imports/{importBatch}', [AgentOperationsController::class, 'importBatch'])->name('api.imports.show');
-        Route::get('/api/security/sessions', [AccountSessionController::class, 'index'])->name('api.security.sessions.index');
-        Route::delete('/api/security/sessions/others', [AccountSessionController::class, 'destroyOthers'])->middleware(['password.confirm', 'throttle:10,1'])->name('api.security.sessions.others.destroy');
-        Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-        Route::patch('/profile', [ProfileController::class, 'update'])->middleware('password.confirm')->name('profile.update');
-        Route::delete('/profile', [ProfileController::class, 'destroy'])->middleware('password.confirm')->name('profile.destroy');
     });
 
     Route::middleware(['business-role:attendant', EnsureOnboardingComplete::class])->prefix('api/staff')->name('api.staff.')->group(function (): void {

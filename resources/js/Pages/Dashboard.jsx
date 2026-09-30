@@ -12,7 +12,7 @@ import StaffDashboard from './Staff/Dashboard';
 
 const cleanLabel = (value) => String(value || 'Not recorded').replaceAll('_', ' ');
 
-function DashboardHome({ businessName, businessInsightEnabled }) {
+function DashboardHome({ businessName, businessInsightEnabled, actionItems = [] }) {
     const { auth, features } = usePage().props;
     const [summary, setSummary] = useState(null);
     const [transactions, setTransactions] = useState([]);
@@ -149,10 +149,10 @@ function DashboardHome({ businessName, businessInsightEnabled }) {
                         <div className="table-scroll"><table className="data-table provider-table recent-transactions-table"><thead><tr><th>Date and time</th><th>Provider</th><th>Reference</th><th>Amount</th><th>Earnings</th><th>Status</th></tr></thead><tbody>
                             {transactions.map((transaction) => <tr key={transaction.id}>
                                 <td data-label="Date"><span className="date-cell">{dateTime(transaction.transaction_at)}</span></td>
-                                <td data-label="Provider"><span className="provider-cell compact"><ProviderLogo provider={transaction.provider} size="sm" /><strong>{transaction.provider?.name || 'Provider'}</strong></span></td>
+                                <td data-label="Provider"><span className="provider-cell compact"><ProviderLogo provider={transaction.provider} size="sm" /><strong>{transaction.provider?.name || 'Provider'}</strong>{transaction.metadata?.activity_scope === 'personal_wallet' && <small>Personal wallet activity</small>}</span></td>
                                 <td data-label="Reference" className="reference-cell">{transaction.external_reference || 'Not supplied'}</td>
                                 <td data-label="Amount" className="amount-cell">{money(transaction.amount)}</td>
-                                <td data-label="Earnings" className="earnings-cell">{transaction.financial_status?.is_final === false ? 'Estimated ' : ''}{money(transaction.estimated_earnings)}</td>
+                                <td data-label="Earnings" className="earnings-cell">{transaction.metadata?.activity_scope === 'personal_wallet' ? 'Not POS earnings' : `${transaction.financial_status?.is_final === false ? 'Estimated ' : ''}${money(transaction.estimated_earnings)}`}</td>
                                 <td data-label="Status"><StatusBadge status={transaction.transaction_status} /></td>
                             </tr>)}
                             {!transactions.length && <tr><td colSpan="6" className="empty-row">No transactions yet. Once POSPilot receives activity, it will appear here.</td></tr>}
@@ -176,8 +176,9 @@ function DashboardHome({ businessName, businessInsightEnabled }) {
                 </div>
 
                 <section className="panel home-issues-panel">
-                    <div className="section-heading"><div><h2>Items to review</h2><p>Based on settlement reconciliation records.</p></div><Link href="/reconciliation" className="text-action">Open reconciliation <span aria-hidden="true">→</span></Link></div>
-                    {issues.length ? <div className="table-scroll"><table className="data-table issues-table"><thead><tr><th>Provider</th><th>Date</th><th>What needs checking</th><th>Expected</th></tr></thead><tbody>{issues.slice(0, 5).map((issue, index) => <tr key={`${issue.type}-${issue.settlement_id || index}`}><td>{issue.provider || 'Provider'}</td><td>{issue.settlement_date || 'Date not recorded'}</td><td>{issue.message || cleanLabel(issue.type)}</td><td>{issue.expected_amount ? money(issue.expected_amount) : 'Not available'}</td></tr>)}</tbody></table></div> : <p className="home-empty-message">Everything looks good. There are no reconciliation issues for today.</p>}
+                    <div className="section-heading"><div><h2>Things that need your attention</h2><p>Items flagged by POSPilot from your recorded activity.</p></div><Link href="/reconciliation" className="text-action">Open reconciliation <span aria-hidden="true">→</span></Link></div>
+                    {actionItems.length > 0 && <ul className="mb-4 grid gap-2" aria-label="Business action items">{actionItems.map((item) => <li key={item.type} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-800"><span>{item.label}</span><Link className="text-action shrink-0" href={item.href}>Review</Link></li>)}</ul>}
+                    {issues.length ? <div className="table-scroll"><table className="data-table issues-table"><thead><tr><th>Provider</th><th>Date</th><th>What needs checking</th><th>Affected amount</th></tr></thead><tbody>{issues.slice(0, 5).map((issue, index) => <tr key={`${issue.type}-${issue.settlement_id || index}`}><td>{issue.provider || 'Provider'}</td><td>{issue.settlement_date || 'Date not recorded'}</td><td>{issue.message || cleanLabel(issue.type)}</td><td>{issue.amount ? money(issue.amount) : issue.expected_amount ? money(issue.expected_amount) : 'Not available'}</td></tr>)}</tbody></table></div> : <p className="home-empty-message">Everything looks good. There are no open reconciliation items for today.</p>}
                 </section>
                 <p className="dashboard-footer"><span>Financial values and confidence status are supplied by POSPilot.</span><span>Amounts shown in NGN.</span></p>
             </>}

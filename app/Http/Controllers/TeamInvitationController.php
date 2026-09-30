@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\BusinessInvitation;
 use App\Models\BusinessMembership;
 use App\Models\User;
+use App\Notifications\SecurityAlertNotification;
+use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -36,7 +39,7 @@ final class TeamInvitationController extends Controller
         ]);
     }
 
-    public function accept(Request $request, string $token): RedirectResponse
+    public function accept(Request $request, string $token, SecurityEventRecorder $events, TransactionalEmailDelivery $delivery): RedirectResponse
     {
         $invitation = $this->findValidInvitation($token);
         abort_unless($invitation, 404);
@@ -86,6 +89,16 @@ final class TeamInvitationController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
         $request->session()->passwordConfirmed();
+        $events->record($user, 'invitation_accepted', $request, ['role' => $user->teamMembership?->role]);
+        $businessOwner = $invitation->agentProfile->user;
+        $delivery->send(
+            fn () => $businessOwner->notify(new SecurityAlertNotification(
+                'A team invitation was accepted',
+                'A team member accepted an invitation to your POSPilot workspace.',
+                'This notification does not include transaction details or provider credentials.',
+            )),
+            'invitation_accepted',
+        );
 
         return redirect()->route('dashboard')->with('success', 'You joined '.$invitation->agentProfile->business_name.'.');
     }

@@ -27,7 +27,8 @@ final class SettlementIngestionService
         $attributes = [
             'agent_profile_id' => $agent->id, 'provider_id' => $data->provider->id, 'terminal_id' => $terminal?->id,
             'import_batch_id' => $importBatchId, 'settlement_reference' => $data->externalReference,
-            'gross_transaction_amount' => $data->grossTransactionAmount, 'provider_fee' => $data->providerFee,
+            'gross_transaction_amount' => $data->grossTransactionAmount, 'provider_fee' => $data->providerFee ?? '0.00',
+            'provider_fee_supplied' => $data->providerFee !== null,
             'expected_amount' => $data->expectedAmount, 'actual_amount' => $data->actualAmount,
             'settlement_date' => $data->settlementDate, 'status' => $data->status->value,
             'reconciliation_outcome' => 'pending', 'source' => $data->source->value,

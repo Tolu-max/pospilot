@@ -24,6 +24,11 @@ final class FinancialReportController extends Controller
         return response()->json(['data' => $this->earnings->byProvider($this->agent($request), ...$this->dates($request))]);
     }
 
+    public function terminalProfitability(Request $request): JsonResponse
+    {
+        return response()->json($this->earnings->terminalProfitability($this->agent($request), ...$this->dates($request)));
+    }
+
     public function reconciliationOverview(Request $request): JsonResponse
     {
         return response()->json($this->reconciliation->overview($this->agent($request), ...$this->dates($request)));
@@ -45,15 +50,19 @@ final class FinancialReportController extends Controller
     public function settlement(Request $request, Settlement $settlement): JsonResponse
     {
         abort_unless($settlement->agent_profile_id === $this->agent($request)->id, 404);
+        $record = $settlement->load(['provider', 'terminal', 'importBatch'])->toArray();
+        $record['provider_fee'] = $settlement->provider_fee_supplied ? $settlement->provider_fee : null;
+        $record['provider_fee_known'] = (bool) $settlement->provider_fee_supplied;
 
-        return response()->json(['settlement' => $settlement->load(['provider', 'terminal', 'importBatch']), 'reconciliation' => $this->reconciliation->compare($settlement)]);
+        return response()->json(['settlement' => $record, 'reconciliation' => $this->reconciliation->compare($settlement)]);
     }
 
     private function agent(Request $request)
     {
-        abort_unless($request->user()?->agentProfile, 404);
+        $agent = $request->user()?->businessAgentProfile();
+        abort_unless($agent !== null, 404);
 
-        return $request->user()->businessAgentProfile();
+        return $agent;
     }
 
     private function dates(Request $request): array

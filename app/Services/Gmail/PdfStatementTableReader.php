@@ -13,7 +13,7 @@ class PdfStatementTableReader
 
     /**
      * @param  list<list<array{x:float,y:float,text:string}>>  $pages
-     * @return array{csv:string,headers:list<string>,rows:int}
+     * @return array{csv:string,headers:list<string>,rows:int,activity_scope:'pos_terminal'|'personal_wallet'}
      */
     public function toCsvFromPositionedPages(array $pages, string $providerSlug): array
     {
@@ -26,7 +26,8 @@ class PdfStatementTableReader
         if ($accountIdentifier !== null) {
             $headers[] = 'Provider Account Identifier';
         }
-        $rows = [];
+        $posRows = [];
+        $walletRows = [];
         foreach ($pages as $page) {
             $groups = $this->groupByY($page);
             $layout = $this->findHeaderLayout($groups, $providerSlug);
@@ -44,22 +45,13 @@ class PdfStatementTableReader
                     continue;
                 }
 
-                $descriptor = trim(implode(' ', array_filter([
-                    $cells['description'] ?? null,
-                    $cells['channel'] ?? null,
-                    $cells['detail'] ?? null,
-                ])));
-                if (! $this->isPosActivity($descriptor)) {
-                    continue;
-                }
-
                 $reference = trim((string) ($cells['reference'] ?? $cells['id'] ?? ''));
                 $date = $providerSlug === 'opay'
                     ? $this->normalizeDateTime((string) ($cells['value_date'] ?? ''), (string) ($cells['time'] ?? ''))
                     : $this->normalizeDateTime((string) ($cells['date'] ?? ''), '');
                 $amounts = $providerSlug === 'opay'
-                    ? ['debit' => $this->decimal($cells['debit'] ?? ''), 'credit' => $this->decimal($cells['credit'] ?? '')]
-                    : ['debit' => $this->decimal($cells['money_out'] ?? ''), 'credit' => $this->decimal($cells['money_in'] ?? '')];
+                    ? ['debit' => $this->decimal($cells['debit'] ?? '', true), 'credit' => $this->decimal($cells['credit'] ?? '', true)]
+                    : ['debit' => $this->decimal($cells['money_out'] ?? '', true), 'credit' => $this->decimal($cells['money_in'] ?? '', true)];
                 $presentAmounts = array_filter($amounts, fn (?string $amount): bool => $amount !== null && BigDecimal::of($amount)->compareTo(0) > 0);
 
                 if ($reference === '' || $date === null || count($presentAmounts) !== 1) {
@@ -70,20 +62,33 @@ class PdfStatementTableReader
                     continue;
                 }
 
+                $descriptor = trim(implode(' ', array_filter([
+                    $cells['description'] ?? null,
+                    $cells['channel'] ?? null,
+                    $cells['detail'] ?? null,
+                ])));
                 $direction = array_key_first($presentAmounts);
-                $rows[] = [
+                $row = [
                     $reference,
                     $presentAmounts[$direction],
                     $date,
                     $this->statusForStatementEntry($descriptor),
-                    'pos_'.$direction,
+                    ($this->isPosActivity($descriptor) ? 'pos_' : 'wallet_').$direction,
                 ];
                 if ($accountIdentifier !== null) {
-                    $rows[array_key_last($rows)][] = $accountIdentifier;
+                    $row[] = $accountIdentifier;
+                }
+
+                if ($this->isPosActivity($descriptor)) {
+                    $posRows[] = $row;
+                } elseif ($descriptor !== '') {
+                    $walletRows[] = $row;
                 }
             }
         }
 
+        $activityScope = $posRows !== [] ? 'pos_terminal' : 'personal_wallet';
+        $rows = $posRows !== [] ? $posRows : $walletRows;
         if ($rows === []) {
             throw new RuntimeException('unsupported_schema');
         }
@@ -97,7 +102,7 @@ class PdfStatementTableReader
         $csv = stream_get_contents($handle);
         fclose($handle);
 
-        return ['csv' => is_string($csv) ? $csv : '', 'headers' => $headers, 'rows' => count($rows)];
+        return ['csv' => is_string($csv) ? $csv : '', 'headers' => $headers, 'rows' => count($rows), 'activity_scope' => $activityScope];
     }
 
     /** @param list<list<array{x:float,y:float,text:string}>> $pages */
@@ -381,18 +386,20 @@ class PdfStatementTableReader
         };
     }
 
-    private function decimal(string $value): ?string
+    private function decimal(string $value, bool $asMagnitude = false): ?string
     {
         $value = trim(str_ireplace(['NGN', '₦', ','], '', $value));
         if ($value === '' || in_array($value, ['-', '—', '–'], true)) {
             return null;
         }
-        if (! preg_match('/^\d+(?:\.\d+)?$/', $value)) {
+        if (! preg_match('/^[+-]?\d+(?:\.\d+)?$/', $value)) {
             return null;
         }
 
         try {
-            return BigDecimal::of($value)->toScale(2, RoundingMode::Unnecessary)->__toString();
+            $decimal = BigDecimal::of($value);
+
+            return ($asMagnitude ? $decimal->abs() : $decimal)->toScale(2, RoundingMode::Unnecessary)->__toString();
         } catch (\Throwable) {
             return null;
         }

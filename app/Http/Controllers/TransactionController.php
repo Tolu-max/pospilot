@@ -51,6 +51,7 @@ class TransactionController extends Controller
     public function updateCharge(Request $request, Transaction $transaction)
     {
         Gate::authorize('update', $transaction);
+        abort_unless(($transaction->metadata['activity_scope'] ?? null) !== 'personal_wallet', 422, 'Customer charges do not apply to personal wallet activity.');
         $validated = $request->validate(['customer_charge_override' => 'nullable|regex:/^\d+(\.\d{1,4})?$/']);
         if ($validated['customer_charge_override'] === null) {
             $effective = $transaction->imported_customer_charge ?? $transaction->calculated_customer_charge ?? '0.00';

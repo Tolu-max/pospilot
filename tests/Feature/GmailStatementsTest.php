@@ -11,12 +11,18 @@ use App\Models\Provider;
 use App\Models\Terminal;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Notifications\SecurityAlertNotification;
+use App\Services\DailyClosingService;
+use App\Services\EarningsService;
 use App\Services\Gmail\GmailStatementConnector;
 use App\Services\GmailStatementImportService;
+use App\Services\ReconciliationService;
 use App\Services\XlsxStatementReader;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -34,7 +40,7 @@ class GmailStatementsTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
         AgentProfile::factory()->create(['user_id' => $user->id]);
 
-        $response = $this->actingAs($user)->get('/integrations/gmail/connect');
+        $response = $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])->get('/integrations/gmail/connect');
 
         $response->assertRedirect();
         $this->assertStringContainsString('scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly', $response->headers->get('Location'));
@@ -52,6 +58,7 @@ class GmailStatementsTest extends TestCase
         $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
         Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
         Queue::fake([SyncConnectedGmailStatements::class]);
+        Notification::fake();
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response([
                 'access_token' => 'fictional-access-token',
@@ -89,6 +96,7 @@ class GmailStatementsTest extends TestCase
         $this->assertSame('o••••@example.test', $connection->gmail_address_masked);
         $this->assertDatabaseMissing('gmail_connections', ['agent_profile_id' => $agent->id, 'access_token' => 'fictional-access-token']);
         Queue::assertPushed(SyncConnectedGmailStatements::class, fn (SyncConnectedGmailStatements $job): bool => $job->connectionId === $connection->id);
+        Notification::assertSentTo($user, SecurityAlertNotification::class);
     }
 
     public function test_gmail_routes_stay_hidden_when_feature_flag_is_disabled(): void
@@ -97,7 +105,7 @@ class GmailStatementsTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
         AgentProfile::factory()->create(['user_id' => $user->id]);
 
-        $this->actingAs($user)->get('/integrations/gmail/connect')->assertNotFound();
+        $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])->get('/integrations/gmail/connect')->assertNotFound();
         $this->actingAs($user)->postJson('/integrations/gmail/sync')->assertNotFound();
     }
 
@@ -193,13 +201,15 @@ class GmailStatementsTest extends TestCase
         $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
         $connection = $this->createGmailConnection($agent, ['status' => 'connected']);
         Http::fake(['https://oauth2.googleapis.com/revoke' => Http::response([], 200)]);
+        Notification::fake();
 
-        $this->actingAs($user)->delete('/integrations/gmail')->assertRedirect('/dashboard?screen=providers');
+        $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])->delete('/integrations/gmail')->assertRedirect('/dashboard?screen=providers');
 
         $this->assertSame('disconnected', $connection->fresh()->status);
         $this->assertDatabaseMissing('gmail_credentials', ['gmail_connection_id' => $connection->id]);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://oauth2.googleapis.com/revoke'
             && $request['token'] === 'fictional-refresh-token');
+        Notification::assertSentTo($user, SecurityAlertNotification::class);
     }
 
     public function test_gmail_sync_ignores_unrelated_sender_and_retains_only_safe_csv_headers_for_mapping(): void
@@ -313,7 +323,7 @@ class GmailStatementsTest extends TestCase
         $this->assertSame(0, Transaction::where('agent_profile_id', $agent->id)->count());
     }
 
-    public function test_previously_unrecognized_pdf_is_retried_and_exposes_safe_mapping_headers(): void
+    public function test_pdf_with_an_updated_pos_parser_is_retried_and_exposes_safe_mapping_headers(): void
     {
         Storage::fake('local');
         $agent = AgentProfile::factory()->create(['selected_provider_slugs' => ['opay']]);
@@ -338,7 +348,7 @@ class GmailStatementsTest extends TestCase
             'file_type' => 'pdf',
             'headers' => ['Old table extraction'],
             'status' => 'unsupported_schema',
-            'failure_code' => 'unsupported_schema',
+            'failure_code' => 'pdf_table_unrecognized',
             'received_at' => now()->subDay(),
         ]);
         $pdf = $this->opayPositionedPdf();
@@ -362,6 +372,96 @@ class GmailStatementsTest extends TestCase
         $this->assertStringNotContainsString('0123456789', json_encode($record->fresh()->toArray(), JSON_THROW_ON_ERROR));
         $this->assertNotNull($record->fresh()->temporary_file_path);
         $this->assertSame(0, Transaction::where('agent_profile_id', $agent->id)->count());
+    }
+
+    public function test_opay_personal_wallet_pdf_is_imported_only_as_separate_wallet_activity(): void
+    {
+        config()->set('gmail_statement.enabled', true);
+        Storage::fake('local');
+        $user = User::factory()->create(['email_verified_at' => now()]);
+        $agent = AgentProfile::factory()->create(['user_id' => $user->id, 'selected_provider_slugs' => ['opay']]);
+        $provider = Provider::factory()->create(['slug' => 'opay', 'name' => 'OPay']);
+        $connection = $this->createGmailConnection($agent, [
+            'provider_rules' => ['opay' => ['sender_email' => 'statements@opay.example.test']],
+            'status' => 'connected',
+        ]);
+        $messageId = 'fictional-wallet-statement';
+        $attachmentId = 'fictional-wallet-pdf';
+        $pdf = $this->opayPositionedPdf('Wallet withdrawal', 'Wallet');
+        $attachment = rtrim(strtr(base64_encode($pdf), '+/', '-_'), '=');
+        Http::fake(['https://gmail.googleapis.com/*' => Http::sequence()
+            ->push(['messages' => [['id' => $messageId]]])
+            ->push(['internalDate' => (string) now()->getTimestampMs(), 'payload' => ['headers' => [
+                ['name' => 'From', 'value' => 'OPay <statements@opay.example.test>'],
+                ['name' => 'Subject', 'value' => 'OPay statement'],
+            ]]])
+            ->push(['payload' => ['parts' => [['filename' => 'statement.pdf', 'body' => ['attachmentId' => $attachmentId, 'size' => strlen($pdf)]]]]])
+            ->push(['data' => $attachment]),
+        ]);
+
+        app(GmailStatementConnector::class)->sync($connection);
+
+        $message = GmailStatementMessage::where('gmail_connection_id', $connection->id)->firstOrFail();
+        $this->assertSame('needs_setup', $message->status);
+        $this->assertSame('personal_wallet_statement', $message->failure_code);
+        $this->assertNotNull($message->temporary_file_path);
+        $this->assertSame(['Transaction Reference', 'Amount', 'Date', 'Status', 'Transaction Type', 'Provider Account Identifier'], $message->headers);
+        $this->assertNotSame('0123456789', $message->masked_account_identifier);
+        $this->assertSame(0, Transaction::where('agent_profile_id', $agent->id)->count());
+
+        $this->actingAs($user)->postJson('/api/gmail/statements/'.$message->id.'/mapping', [
+            'activity_scope' => 'pos_terminal',
+            'terminal_id' => Terminal::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id])->id,
+        ])->assertStatus(422);
+
+        $this->actingAs($user)->postJson('/api/gmail/statements/'.$message->id.'/mapping', [
+            'activity_scope' => 'personal_wallet',
+            'column_mapping' => [
+                'external_reference' => 'Transaction Reference',
+                'amount' => 'Amount',
+                'transaction_at' => 'Date',
+                'transaction_status' => 'Status',
+                'transaction_type' => 'Transaction Type',
+                'provider_account_identifier' => 'Provider Account Identifier',
+            ],
+        ])->assertOk()->assertJson(['status' => 'processed', 'rows_imported' => 1, 'rows_duplicate' => 0, 'rows_failed' => 0]);
+
+        $walletTransaction = Transaction::where('agent_profile_id', $agent->id)->sole();
+        $this->assertNull($walletTransaction->terminal_id);
+        $this->assertSame('wallet_debit', $walletTransaction->transaction_type);
+        $this->assertSame('personal_wallet', $walletTransaction->metadata['activity_scope']);
+        $this->assertFalse($walletTransaction->provider_fee_supplied);
+        $this->assertSame('0.00', $walletTransaction->customer_charge);
+        $this->assertArrayNotHasKey('provider_account_identifier', $walletTransaction->metadata);
+        $this->assertNotSame('0123456789', $walletTransaction->metadata['provider_account_identifier_fingerprint'] ?? null);
+
+        $second = GmailStatementMessage::create([
+            'gmail_connection_id' => $connection->id,
+            'agent_profile_id' => $agent->id,
+            'provider_id' => $provider->id,
+            'dedupe_fingerprint' => hash('sha256', 'overlapping-wallet-statement'),
+            'gmail_message_id' => 'encrypted-overlapping-message',
+            'gmail_attachment_id' => 'encrypted-overlapping-attachment',
+            'file_name' => 'wallet-statement.pdf',
+            'file_type' => 'pdf',
+            'headers' => $message->headers,
+            'status' => 'needs_setup',
+            'failure_code' => 'personal_wallet_statement',
+        ]);
+        $imports = app(GmailStatementImportService::class);
+        $imports->retainForMapping($second, "Transaction Reference,Amount,Date,Status,Transaction Type,Provider Account Identifier\nFICTIONAL-REF-1,5000.00,2026-09-28 09:15:00,successful,wallet_debit,0123456789\n");
+        $profile = $message->fresh()->mappingProfile;
+        $imports->process($second, $profile);
+
+        $this->assertSame(1, Transaction::where('agent_profile_id', $agent->id)->count());
+        $this->assertSame(1, $second->fresh()->rows_duplicate);
+        $earnings = app(EarningsService::class)->summarize($agent);
+        $this->assertSame(0, $earnings['successful_transaction_count']);
+        $this->assertSame('0.00', $earnings['estimated_net_earnings']);
+        $this->assertSame('0.00', app(ReconciliationService::class)->expectedSettlementFor($agent, $provider->id, date: '2026-09-28'));
+        $closing = app(DailyClosingService::class)->preview($agent, CarbonImmutable::parse('2026-09-28'));
+        $this->assertSame('0.00', $closing['transaction_volume']);
+        $this->assertSame('0.00', $closing['expected_electronic_position']);
     }
 
     public function test_mapped_csv_uses_existing_ingestion_and_keeps_missing_fees_unverified_and_idempotent(): void
@@ -466,14 +566,15 @@ class GmailStatementsTest extends TestCase
         return $connection;
     }
 
-    private function opayPositionedPdf(): string
+    private function opayPositionedPdf(string $description = 'POS purchase', string $channel = 'POS'): string
     {
+        $isWithdrawal = str_contains(strtolower($description), 'withdraw');
         $elements = [
             [80, 740, 'Account Number'], [180, 740, '0123456789'],
             [50, 700, 'Trans. Time'], [120, 700, 'Value Date'], [185, 700, 'Description'], [250, 700, 'Debit(₦)'],
             [300, 700, 'Credit(₦)'], [340, 700, 'Balance After'], [390, 700, 'Channel'], [455, 700, 'Transaction Reference'],
-            [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, 'POS purchase'], [250, 680, '-'],
-            [300, 680, '5,000.00'], [340, 680, '17,000.00'], [390, 680, 'POS'], [455, 680, 'FICTIONAL-REF-1'],
+            [50, 680, '09:15:00 AM'], [120, 680, '09/28/2026'], [185, 680, $description], [250, 680, $isWithdrawal ? '5,000.00' : '-'],
+            [300, 680, $isWithdrawal ? '-' : '5,000.00'], [340, 680, '17,000.00'], [390, 680, $channel], [455, 680, 'FICTIONAL-REF-1'],
         ];
         $stream = '';
         foreach ($elements as [$x, $y, $text]) {
