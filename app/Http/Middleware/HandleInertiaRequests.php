@@ -30,6 +30,9 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $agentProfile = $request->user()?->businessAgentProfile();
+        $businessName = $agentProfile?->business_name;
+
         return [
             ...parent::share($request),
             'auth' => [
@@ -38,9 +41,10 @@ class HandleInertiaRequests extends Middleware
             'userName' => $request->user()?->name,
             'workspace' => [
                 'role' => $request->user()?->businessRole(),
-                'business_name' => $request->user()?->businessAgentProfile()?->business_name,
+                'business_name' => $businessName,
             ],
-            'workspaceReady' => $request->user()?->businessAgentProfile()?->onboarding_state === OnboardingState::Completed,
+            'workspaceReady' => $agentProfile?->onboarding_state === OnboardingState::Completed,
+            'demoWorkspace' => $businessName === 'POSPilot Demo Business',
             'analyticsEvent' => fn (): ?array => $request->session()->get('analytics_event'),
             'features' => [
                 'moniepointDirect' => (bool) config('provider_secrets.moniepoint_direct_enabled'),

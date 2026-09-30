@@ -21,7 +21,7 @@ function dateDaysAgo(days) {
 }
 
 function DashboardHome({ businessName, businessInsightEnabled, actionItems = [] }) {
-    const { auth } = usePage().props;
+    const { auth, demoWorkspace } = usePage().props;
     const [summary, setSummary] = useState(null);
     const [transactions, setTransactions] = useState([]);
     const [issues, setIssues] = useState([]);
@@ -87,7 +87,7 @@ function DashboardHome({ businessName, businessInsightEnabled, actionItems = [] 
     const statusTotal = ['successful', 'pending', 'failed', 'reversed'].reduce((total, status) => total + (Number(statusCounts[status]) || 0), 0);
     const greetingHour = new Date().getHours();
     const greeting = greetingHour < 12 ? 'Good morning' : greetingHour < 17 ? 'Good afternoon' : 'Good evening';
-    const greetingText = auth?.user?.name?.split(' ')[0] || 'there';
+    const greetingText = demoWorkspace ? 'Demo operator' : auth?.user?.name?.split(' ')[0] || 'there';
 
     return <AppShell title="Home">
         <div className="dashboard">

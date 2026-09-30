@@ -53,7 +53,22 @@ class DashboardOnboardingTest extends TestCase
 
         $this->actingAs($user)->get('/dashboard')->assertInertia(fn (Assert $page) => $page
             ->component('Dashboard')
-            ->where('workspaceReady', true));
+            ->where('workspaceReady', true)
+            ->where('demoWorkspace', false));
+    }
+
+    public function test_showcase_workspace_is_marked_as_demo_without_marking_other_businesses(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+        AgentProfile::factory()->create([
+            'user_id' => $user->id,
+            'business_name' => 'POSPilot Demo Business',
+            'onboarding_state' => 'completed',
+        ]);
+
+        $this->actingAs($user)->get('/dashboard')->assertInertia(fn (Assert $page) => $page
+            ->component('Dashboard')
+            ->where('demoWorkspace', true));
     }
 
     public function test_dashboard_action_center_flags_unknown_fees_and_recorded_closing_variance(): void

@@ -43,7 +43,7 @@ function Icon({ name, size = 17 }) {
 
 export default function AppShell({ children, title = 'Home' }) {
     const page = usePage();
-    const { auth, userName, workspaceReady, workspace } = page.props;
+    const { auth, userName, workspaceReady, workspace, demoWorkspace } = page.props;
     const [menuOpen, setMenuOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const businessName = workspace?.business_name || '';
@@ -52,7 +52,7 @@ export default function AppShell({ children, title = 'Home' }) {
     const currentUrl = new URL(page.url || window.location.href, window.location.origin);
     const screen = currentUrl.searchParams.get('screen');
     const user = auth?.user;
-    const accountName = user?.name || userName || 'Your account';
+    const accountName = demoWorkspace ? 'Demo operator' : user?.name || userName || 'Your account';
     const isWorkspaceReady = workspaceReady === true;
     const role = workspace?.role || 'owner';
     const visibleNavigation = navigationSections[role] || navigationSections.attendant;
@@ -126,7 +126,7 @@ export default function AppShell({ children, title = 'Home' }) {
                         {accountOpen && <div id="account-menu-panel" className="account-menu-panel">
                             <div className="account-menu-identity">
                                 <strong>{accountName}</strong>
-                                {user?.email && <span>{user.email}</span>}
+                                {!demoWorkspace && user?.email && <span>{user.email}</span>}
                                 <small>{businessName || 'Business workspace'}</small>
                             </div>
                             {isWorkspaceReady && role === 'owner' && <Link href="/profile" className="account-menu-link" onClick={() => setAccountOpen(false)}>Account settings</Link>}
@@ -135,6 +135,10 @@ export default function AppShell({ children, title = 'Home' }) {
                     </div>
                 </div>
             </header>
+            {demoWorkspace && <aside className="showcase-banner" role="note" aria-label="Demo workspace notice">
+                <strong>SHOWCASE DEMO</strong>
+                <span>Dashboard records are fictional samples for demonstration. Gmail is connected for flow testing; these sample rows were not imported from Gmail.</span>
+            </aside>}
             <div className="page-content">{children}</div>
         </main>
         <ToastViewport />

@@ -268,3 +268,7 @@
     .workflow-item:hover, .capability-card:hover, .public-button:hover, .tx-row-link a:hover, .public-footer nav a:hover { transform: none !important; }
     .public-nav { transform: none; }
 }
+.showcase-banner { display: flex; align-items: center; gap: 12px; margin: 18px 32px 0; padding: 12px 15px; border: 1px solid #f2d98e; border-radius: 10px; color: #573f0b; background: #fff9e8; font-size: 13px; line-height: 1.45; }
+.showcase-banner strong { flex: none; font-size: 10px; letter-spacing: .09em; }
+@media (max-width: 1100px) { .showcase-banner { margin-inline: 22px; } }
+@media (max-width: 720px) { .showcase-banner { align-items: flex-start; flex-direction: column; gap: 4px; margin: 12px 14px 0; padding: 11px 12px; font-size: 12px; } }
