@@ -34,7 +34,7 @@ class DashboardController extends Controller
         $actionItems = [];
         $openShiftCount = BusinessShift::query()->where('agent_profile_id', $agent->id)->where('status', 'active')->count();
         if ($openShiftCount > 0) {
-            $actionItems[] = ['type' => 'open_shifts', 'label' => $openShiftCount.' staff shift'.($openShiftCount === 1 ? '' : 's').' still open', 'href' => '/dashboard?screen=team'];
+            $actionItems[] = ['type' => 'open_shifts', 'label' => $openShiftCount.' staff shift'.($openShiftCount === 1 ? '' : 's').' still open', 'href' => '/team'];
         }
         $missingFeeCount = $agent->transactions()->posFinancial()->where('transaction_status', TransactionStatus::Successful->value)->where('provider_fee_supplied', false)->whereDate('transaction_at', '>=', today()->subDays(6))->count();
         if ($missingFeeCount > 0) {

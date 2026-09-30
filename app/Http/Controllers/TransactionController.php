@@ -4,12 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Enums\CustomerChargeSource;
 use App\Enums\OnboardingState;
+use App\Models\Terminal;
 use App\Models\Transaction;
 use App\Services\EarningsService;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class TransactionController extends Controller
@@ -41,11 +43,64 @@ class TransactionController extends Controller
     public function show(Request $request, Transaction $transaction, EarningsService $earnings)
     {
         Gate::authorize('view', $transaction);
-        $transaction->load(['provider', 'terminal', 'importBatch', 'adjustments']);
+        $transaction->load(['provider', 'providerAccount', 'terminal', 'importBatch', 'adjustments']);
         $transaction->setAttribute('estimated_earnings', $earnings->transactionContribution($transaction));
         $transaction->setAttribute('financial_status', $earnings->transactionFinancialStatus($transaction));
 
-        return Inertia::render('Transactions/Show', ['transaction' => $transaction]);
+        $agent = $request->user()->businessAgentProfile();
+        $terminals = $request->user()->businessRole() === 'owner'
+            ? Terminal::where('agent_profile_id', $agent->id)
+                ->where('provider_id', $transaction->provider_id)
+                ->where('active', true)
+                ->where(function ($query) use ($transaction): void {
+                    $query->whereNull('provider_account_id')->orWhere('provider_account_id', $transaction->provider_account_id);
+                })
+                ->orderBy('name')->get(['id', 'name', 'provider_id'])
+            : collect();
+
+        return Inertia::render('Transactions/Show', ['transaction' => $transaction, 'terminals' => $terminals, 'canAssignTerminal' => $request->user()->businessRole() === 'owner']);
+    }
+
+    public function updateTerminal(Request $request, Transaction $transaction)
+    {
+        Gate::authorize('update', $transaction);
+        $agent = $request->user()->businessAgentProfile();
+        $validated = $request->validate([
+            'terminal_id' => [
+                'present',
+                'nullable',
+                'integer',
+                Rule::exists('terminals', 'id')
+                    ->where('agent_profile_id', $agent->id)
+                    ->where('provider_id', $transaction->provider_id)
+                    ->where('active', true),
+            ],
+        ]);
+        $terminal = isset($validated['terminal_id']) ? Terminal::findOrFail($validated['terminal_id']) : null;
+        if ($terminal !== null && $transaction->provider_account_id !== null && $terminal->provider_account_id !== null) {
+            abort_unless($transaction->provider_account_id === $terminal->provider_account_id, 422, 'Choose a terminal assigned to this provider account.');
+        }
+        if ($terminal !== null && $transaction->provider_account_id !== null && $terminal->provider_account_id === null) {
+            $terminal->update(['provider_account_id' => $transaction->provider_account_id]);
+        }
+        if ($transaction->terminal_id !== $terminal?->id) {
+            $metadata = $transaction->metadata ?? [];
+            $metadata['terminal_assignment_history'] = [
+                ...array_slice((array) ($metadata['terminal_assignment_history'] ?? []), -9),
+                [
+                    'from_terminal_id' => $transaction->terminal_id,
+                    'to_terminal_id' => $terminal?->id,
+                    'assigned_at' => now()->toIso8601String(),
+                ],
+            ];
+            $transaction->update(['terminal_id' => $terminal?->id, 'metadata' => $metadata]);
+        }
+        $transaction = $transaction->fresh(['provider', 'providerAccount', 'terminal']);
+        if ($request->expectsJson()) {
+            return response()->json($transaction);
+        }
+
+        return back()->with('success', 'Terminal assignment updated.');
     }
 
     public function updateCharge(Request $request, Transaction $transaction)

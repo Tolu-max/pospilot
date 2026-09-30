@@ -100,6 +100,7 @@ Route::middleware(['auth', 'auth.session', 'verified'])->group(function (): void
         Route::get('/api/transactions', [AgentOperationsController::class, 'transactions'])->name('api.transactions.index');
         Route::get('/api/transactions/{transaction}', [AgentOperationsController::class, 'transaction'])->name('api.transactions.show');
         Route::patch('/transactions/{transaction}/customer-charge', [TransactionController::class, 'updateCharge'])->name('transactions.customer-charge.update');
+        Route::patch('/transactions/{transaction}/terminal', [TransactionController::class, 'updateTerminal'])->name('transactions.terminal.update');
         Route::patch('/api/transactions/{transaction}/customer-charge', [TransactionController::class, 'updateCharge'])->name('api.transactions.customer-charge.update');
         Route::get('/reconciliation', [ReconciliationController::class, 'index'])->name('reconciliation.index');
         Route::post('/api/business-insight', BusinessInsightController::class)->middleware(['business-role:owner', 'throttle:business-insight'])->name('api.business-insight');

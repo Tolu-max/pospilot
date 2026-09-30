@@ -81,6 +81,11 @@ class AgentProfile extends Model
         return $this->hasMany(ProviderConnection::class);
     }
 
+    public function providerAccounts(): HasMany
+    {
+        return $this->hasMany(ProviderAccount::class);
+    }
+
     public function dailyClosings(): HasMany
     {
         return $this->hasMany(DailyClosing::class);

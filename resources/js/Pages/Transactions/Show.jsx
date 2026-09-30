@@ -5,8 +5,9 @@ import ProviderLogo from '../../Components/ProviderLogo';
 
 const label = (value) => String(value || 'Not recorded').replaceAll('_', ' ');
 
-export default function Show({ transaction }) {
+export default function Show({ transaction, terminals = [], canAssignTerminal = false }) {
     const form = useForm({ customer_charge_override: transaction.customer_charge_override || '' });
+    const terminalForm = useForm({ terminal_id: transaction.terminal_id ? String(transaction.terminal_id) : '' });
     const financial = transaction.financial_status || {};
     const isFinal = financial.is_final === true;
     const isSuccessful = transaction.transaction_status === 'successful';
@@ -16,6 +17,11 @@ export default function Show({ transaction }) {
     function save(event) {
         event.preventDefault();
         form.patch(`/transactions/${transaction.id}/customer-charge`, { preserveScroll: true });
+    }
+
+    function saveTerminal(event) {
+        event.preventDefault();
+        terminalForm.patch(`/transactions/${transaction.id}/terminal`, { preserveScroll: true });
     }
 
     return <AppShell title="Transaction details">
@@ -78,11 +84,25 @@ export default function Show({ transaction }) {
                         <DetailField label="Settlement status" value={label(transaction.settlement_status)} />
                         <DetailField label="Provider" value={<span className="detail-provider"><ProviderLogo provider={transaction.provider} size="sm" />{transaction.provider?.name || 'Not recorded'}</span>} />
                         <DetailField label={isPersonalWalletActivity ? 'Activity type' : 'Terminal'} value={isPersonalWalletActivity ? 'Personal wallet statement' : transaction.terminal?.name || 'Not recorded'} />
+                        {!isPersonalWalletActivity && transaction.provider_account && <DetailField label="Provider account" value={transaction.provider_account.display_name} />}
                         <DetailField label="Reference" value={transaction.external_reference || 'Not supplied'} />
                         <DetailField label="Transaction time" value={dateTime(transaction.transaction_at)} />
                         <DetailField label="Record source" value={label(transaction.source)} />
                         {transaction.import_batch && <DetailField label="Import file" value={transaction.import_batch.filename} />}
                     </dl>
+                    {canAssignTerminal && !isPersonalWalletActivity && terminals.length > 0 && <form onSubmit={saveTerminal} className="mt-5 rounded-xl border border-brand-line p-4">
+                        <h3 className="font-bold">Terminal assignment</h3>
+                        <p className="mt-1 text-sm text-slate-600">Keep this transaction unassigned or link it to a known terminal. The statement will not be imported again.</p>
+                        <div className="mt-3 flex flex-wrap gap-3">
+                            <select aria-label="Assign terminal" value={terminalForm.data.terminal_id} onChange={(event) => terminalForm.setData('terminal_id', event.target.value)} className="min-h-11 min-w-56 rounded-lg border border-brand-line px-3">
+                                <option value="">Unassigned terminal</option>
+                                {terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}
+                            </select>
+                            <button className="tx-action-button tx-action-button-primary" type="submit" disabled={terminalForm.processing || terminalForm.data.terminal_id === String(transaction.terminal_id || '')}>{terminalForm.processing ? 'Saving…' : 'Save assignment'}</button>
+                        </div>
+                        {terminalForm.recentlySuccessful && <p role="status" className="mt-2 text-sm font-semibold text-emerald-800">Terminal assignment updated.</p>}
+                        {terminalForm.errors.terminal_id && <p role="alert" className="mt-2 text-sm text-red-700">{terminalForm.errors.terminal_id}</p>}
+                    </form>}
                 </section>
             </div>
         </div>

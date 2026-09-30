@@ -13,7 +13,7 @@ class PdfStatementTableReader
 
     /**
      * @param  list<list<array{x:float,y:float,text:string}>>  $pages
-     * @return array{csv:string,headers:list<string>,rows:int,activity_scope:'pos_terminal'|'personal_wallet'}
+     * @return array{csv:string,headers:list<string>,rows:int,activity_scope:'pos_terminal',activity_summary:array{pos:int,wallet:int,ambiguous:int,patterns:list<array{id:string,label:string,rows:int,total_amount:string,selectable:bool}>}}
      */
     public function toCsvFromPositionedPages(array $pages, string $providerSlug): array
     {
@@ -21,13 +21,15 @@ class PdfStatementTableReader
             throw new RuntimeException('unsupported_schema');
         }
 
-        $headers = ['Transaction Reference', 'Amount', 'Date', 'Status', 'Transaction Type'];
+        $headers = ['Transaction Reference', 'Amount', 'Date', 'Status', 'Transaction Type', 'Activity Classification', 'Activity Pattern'];
         $accountIdentifier = $this->accountIdentifier($pages);
         if ($accountIdentifier !== null) {
             $headers[] = 'Provider Account Identifier';
         }
-        $posRows = [];
-        $walletRows = [];
+        $rows = [];
+        $summary = ['pos' => 0, 'wallet' => 0, 'ambiguous' => 0];
+        $patterns = [];
+        $hasValidActivityRows = false;
         foreach ($pages as $page) {
             $groups = $this->groupByY($page);
             $layout = $this->findHeaderLayout($groups, $providerSlug);
@@ -61,6 +63,7 @@ class PdfStatementTableReader
                 if ($providerSlug === 'opay' && $this->decimal($cells['balance'] ?? '') === null) {
                     continue;
                 }
+                $hasValidActivityRows = true;
 
                 $descriptor = trim(implode(' ', array_filter([
                     $cells['description'] ?? null,
@@ -73,25 +76,33 @@ class PdfStatementTableReader
                     $presentAmounts[$direction],
                     $date,
                     $this->statusForStatementEntry($descriptor),
-                    ($this->isPosActivity($descriptor) ? 'pos_' : 'wallet_').$direction,
+                    'pos_'.$direction,
                 ];
+                $classification = $this->classifyActivity($descriptor, (string) ($cells['channel'] ?? ''));
+                $pattern = $this->activityPattern($descriptor, (string) ($cells['channel'] ?? ''), $direction);
+                $row[] = $classification;
+                $row[] = $pattern['id'];
                 if ($accountIdentifier !== null) {
                     $row[] = $accountIdentifier;
                 }
-
-                if ($this->isPosActivity($descriptor)) {
-                    $posRows[] = $row;
-                } elseif ($descriptor !== '') {
-                    $walletRows[] = $row;
+                $rows[] = $row;
+                $summary[$classification]++;
+                if ($classification === 'ambiguous') {
+                    $patterns[$pattern['id']] ??= ['id' => $pattern['id'], 'label' => $pattern['label'], 'rows' => 0, 'total_amount' => '0.00', 'selectable' => $pattern['selectable']];
+                    $patterns[$pattern['id']]['rows']++;
+                    $patterns[$pattern['id']]['total_amount'] = (string) BigDecimal::of($patterns[$pattern['id']]['total_amount'])->plus($presentAmounts[$direction])->toScale(2);
                 }
             }
         }
 
-        $activityScope = $posRows !== [] ? 'pos_terminal' : 'personal_wallet';
-        $rows = $posRows !== [] ? $posRows : $walletRows;
-        if ($rows === []) {
+        if (! $hasValidActivityRows) {
             throw new RuntimeException('unsupported_schema');
         }
+        if ($rows === []) {
+            throw new RuntimeException('pdf_no_activity_rows');
+        }
+
+        $summary['patterns'] = array_values($patterns);
 
         $handle = fopen('php://temp', 'w+b');
         fputcsv($handle, $headers, ',', '"', '');
@@ -102,7 +113,7 @@ class PdfStatementTableReader
         $csv = stream_get_contents($handle);
         fclose($handle);
 
-        return ['csv' => is_string($csv) ? $csv : '', 'headers' => $headers, 'rows' => count($rows), 'activity_scope' => $activityScope];
+        return ['csv' => is_string($csv) ? $csv : '', 'headers' => $headers, 'rows' => count($rows), 'activity_scope' => 'pos_terminal', 'activity_summary' => $summary];
     }
 
     /** @param list<list<array{x:float,y:float,text:string}>> $pages */
@@ -368,10 +379,47 @@ class PdfStatementTableReader
         return false;
     }
 
-    private function isPosActivity(string $descriptor): bool
+    private function classifyActivity(string $descriptor, string $channel): string
     {
-        return preg_match('/\bpos\b|\bterminal\b|\bcard\b/i', $descriptor) === 1
-            && preg_match('/\b(?:airtime|data purchase|bill payment|utility|commission fee|service fee)\b/i', $descriptor) !== 1;
+        if (preg_match('/\b(?:commission|service|processing)\s+fee\b/i', $descriptor) === 1) {
+            return 'wallet';
+        }
+
+        if (preg_match('/^(?:pos(?:\s+terminal)?|terminal|point\s+of\s+sale)$/i', trim($channel)) === 1
+            || preg_match('/\b(?:pos|point\s+of\s+sale|terminal)\s+(?:card\s+)?(?:purchase|payment|withdrawal|sale|collection|transaction)\b|\b(?:purchase|payment|withdrawal|sale|collection|transaction)\s+(?:at|via|on)\s+(?:pos|terminal)\b/i', $descriptor) === 1) {
+            return 'pos';
+        }
+
+        if (preg_match('/\b(?:wallet|mobile app|internet banking|mobile banking|airtime|data purchase|bill payment|utility payment|interest|bank transfer|fund transfer|transfer to bank)\b/i', $channel.' '.$descriptor) === 1
+            || preg_match('/\b(?:mobile|app)\b/i', $channel) === 1) {
+            return 'wallet';
+        }
+
+        return 'ambiguous';
+    }
+
+    /** @return array{id:string,label:string,selectable:bool} */
+    private function activityPattern(string $descriptor, string $channel, string $direction): array
+    {
+        $safeTerms = ['pos', 'point of sale', 'terminal', 'wallet', 'transfer', 'bank', 'cash', 'withdrawal', 'deposit', 'purchase', 'payment', 'reversal', 'refund', 'airtime', 'data', 'utility', 'fee', 'settlement', 'merchant', 'card', 'atm', 'bill', 'recharge', 'topup', 'fund', 'account', 'agent', 'commission', 'loan', 'interest', 'qr', 'online', 'mobile', 'app', 'send', 'receive', 'credit', 'debit', 'cashout', 'payout', 'internal', 'external'];
+        $text = strtolower($descriptor.' '.$channel);
+        $terms = array_values(array_filter($safeTerms, fn (string $term): bool => preg_match('/\b'.preg_quote($term, '/').'\b/i', $text) === 1));
+        $channelCategory = match (true) {
+            preg_match('/\b(?:pos|terminal|point of sale)\b/i', $channel) === 1 => 'POS terminal channel',
+            preg_match('/\batm\b/i', $channel) === 1 => 'ATM channel',
+            preg_match('/\b(?:mobile|app|online)\b/i', $channel) === 1 => 'Mobile or online channel',
+            preg_match('/\bwallet\b/i', $channel) === 1 => 'Wallet channel',
+            preg_match('/\bbank\b/i', $channel) === 1 => 'Bank channel',
+            trim($channel) === '' => 'No channel label',
+            default => 'Other channel',
+        };
+        $selectable = $terms !== [] || in_array($channelCategory, ['POS terminal channel', 'ATM channel', 'Mobile or online channel', 'Wallet channel', 'Bank channel'], true);
+        $signature = implode('|', $terms) ?: 'unrecognized';
+        $signature .= '|'.$channelCategory.'|'.$direction;
+        $label = $terms === [] ? 'Unrecognized activity' : ucfirst(implode(' · ', $terms));
+        $label .= ' · '.$channelCategory.' · '.($direction === 'credit' ? 'Money in' : 'Money out');
+
+        return ['id' => hash('sha256', $signature), 'label' => $label, 'selectable' => $selectable];
     }
 
     private function statusForStatementEntry(string $descriptor): string

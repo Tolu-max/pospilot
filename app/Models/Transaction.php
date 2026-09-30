@@ -16,7 +16,7 @@ class Transaction extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['agent_profile_id', 'provider_id', 'terminal_id', 'import_batch_id', 'external_reference', 'transaction_type', 'amount', 'customer_charge', 'imported_customer_charge', 'calculated_customer_charge', 'customer_charge_override', 'customer_charge_override_by', 'customer_charge_override_at', 'customer_charge_source', 'provider_fee', 'transaction_status', 'settlement_status', 'transaction_at', 'settled_at', 'source', 'import_fingerprint', 'metadata'];
+    protected $fillable = ['agent_profile_id', 'provider_id', 'provider_account_id', 'terminal_id', 'import_batch_id', 'external_reference', 'transaction_type', 'amount', 'customer_charge', 'imported_customer_charge', 'calculated_customer_charge', 'customer_charge_override', 'customer_charge_override_by', 'customer_charge_override_at', 'customer_charge_source', 'provider_fee', 'transaction_status', 'settlement_status', 'transaction_at', 'settled_at', 'source', 'import_fingerprint', 'metadata'];
 
     protected function casts(): array
     {
@@ -39,6 +39,11 @@ class Transaction extends Model
     public function provider(): BelongsTo
     {
         return $this->belongsTo(Provider::class);
+    }
+
+    public function providerAccount(): BelongsTo
+    {
+        return $this->belongsTo(ProviderAccount::class);
     }
 
     public function terminal(): BelongsTo

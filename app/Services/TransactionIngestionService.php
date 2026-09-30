@@ -8,6 +8,7 @@ use App\Enums\SettlementStatus;
 use App\Enums\TransactionAdjustmentSource;
 use App\Enums\TransactionSource;
 use App\Models\AgentProfile;
+use App\Models\ProviderAccount;
 use App\Models\Terminal;
 use App\Models\Transaction;
 use App\Support\Money;
@@ -35,7 +36,28 @@ final class TransactionIngestionService
             return ['status' => 'duplicate', 'transaction' => $existing];
         }
 
-        $terminal = $data->terminalIdentifier ? Terminal::firstOrCreate(['agent_profile_id' => $agent->id, 'provider_id' => $data->provider->id, 'terminal_identifier' => $data->terminalIdentifier], ['name' => 'Imported terminal '.$data->terminalIdentifier]) : null;
+        $providerAccount = $data->providerAccountId === null
+            ? null
+            : ProviderAccount::where('agent_profile_id', $agent->id)->where('provider_id', $data->provider->id)->findOrFail($data->providerAccountId);
+        $terminal = $data->terminalId !== null
+            ? Terminal::where('agent_profile_id', $agent->id)
+                ->where('provider_id', $data->provider->id)
+                ->where('active', true)
+                ->findOrFail($data->terminalId)
+            : ($data->terminalIdentifier
+            ? Terminal::firstOrCreate(
+                ['agent_profile_id' => $agent->id, 'provider_id' => $data->provider->id, 'terminal_identifier' => $data->terminalIdentifier],
+                ['provider_account_id' => $providerAccount?->id, 'name' => 'Imported terminal '.$data->terminalIdentifier],
+            )
+            : null);
+        if ($terminal !== null && $providerAccount !== null) {
+            if ($terminal->provider_account_id !== null && $terminal->provider_account_id !== $providerAccount->id) {
+                throw new \InvalidArgumentException('The terminal is linked to a different provider account.');
+            }
+            if ($terminal->provider_account_id === null) {
+                $terminal->update(['provider_account_id' => $providerAccount->id]);
+            }
+        }
         $isPersonalWalletActivity = ($data->metadata['activity_scope'] ?? null) === 'personal_wallet';
         $calculatedCharge = $isPersonalWalletActivity ? '0.00' : $this->charges->calculate($agent, $data->amount, $data->provider->id);
         $customerChargeComponents = $isPersonalWalletActivity
@@ -67,6 +89,7 @@ final class TransactionIngestionService
             ? $providedCustomerCharge
             : null;
         $attributes = ['agent_profile_id' => $agent->id, 'provider_id' => $data->provider->id, 'terminal_id' => $terminal?->id, 'import_batch_id' => $importBatchId, 'external_reference' => $data->externalReference, 'transaction_type' => $data->transactionType, 'amount' => $data->amount, 'customer_charge' => $effectiveCharge, 'imported_customer_charge' => $importedCustomerCharge, 'calculated_customer_charge' => $calculatedCharge, 'customer_charge_override' => null, 'customer_charge_source' => $customerChargeSource instanceof CustomerChargeSource ? $customerChargeSource->value : $customerChargeSource, 'provider_fee' => $data->providerFee, 'provider_fee_supplied' => $data->providerFeeSupplied, 'transaction_status' => $data->status->value, 'settlement_status' => ($data->settlementStatus ?? SettlementStatus::Pending)->value, 'transaction_at' => $data->transactionAt, 'settled_at' => $data->settledAt, 'source' => $data->source->value, 'import_fingerprint' => $fingerprint, 'metadata' => [...$data->metadata, 'provider_fee_supplied' => $data->providerFeeSupplied, ...($data->providerFeeSupplied ? ['provider_fee_provenance' => $data->source->provenance()] : [])]];
+        $attributes['provider_account_id'] = $providerAccount?->id;
         try {
             $transaction = DB::transaction(function () use ($attributes, $data, $fingerprint): Transaction {
                 $transaction = Transaction::create($attributes);

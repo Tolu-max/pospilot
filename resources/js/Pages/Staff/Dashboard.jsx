@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import AppShell from '../../Layouts/AppShell';
 import { Button, Card, EmptyState, Field, LoadingCard, Notice, PageHeading, SelectField } from '../../Components/PosPilotUI';
 import { api, dateTime, money } from '../../lib/api';
+import { trackSafeEvent } from '../../lib/analytics';
 
 function shiftVariance(summary) {
     if (!summary || summary.variance === null) return 'Variance unknown';
@@ -37,7 +38,7 @@ export default function StaffDashboard({ businessName, role }) {
 
     async function submit(path, body, successMessage) {
         setBusy(true); setError(''); setNotice('');
-        try { await api(path, { method: 'POST', body }); setNotice(successMessage); await load(); }
+        try { await api(path, { method: 'POST', body }); if (path === '/api/staff/shifts') trackSafeEvent('shift_started'); else if (path.endsWith('/close')) trackSafeEvent('shift_closed'); setNotice(successMessage); await load(); }
         catch (requestError) { setError(requestError.message); }
         finally { setBusy(false); }
     }

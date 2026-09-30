@@ -12,7 +12,7 @@ class Terminal extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['agent_profile_id', 'provider_id', 'name', 'terminal_identifier', 'active'];
+    protected $fillable = ['agent_profile_id', 'provider_id', 'provider_account_id', 'name', 'terminal_identifier', 'active'];
 
     protected function casts(): array
     {
@@ -27,6 +27,11 @@ class Terminal extends Model
     public function provider(): BelongsTo
     {
         return $this->belongsTo(Provider::class);
+    }
+
+    public function providerAccount(): BelongsTo
+    {
+        return $this->belongsTo(ProviderAccount::class);
     }
 
     public function transactions(): HasMany

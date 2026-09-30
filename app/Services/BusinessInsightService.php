@@ -42,6 +42,15 @@ final class BusinessInsightService
             'reconciliation_issue_count' => $summary['reconciliation_issue_count'],
             'closing_variance' => $closingVariance === null ? null : (string) $closingVariance,
         ];
+        $previousDay = $this->summaryService->yesterday($agent);
+        if ($previousDay['successful_transaction_count'] > 0) {
+            $aggregate['previous_day'] = [
+                'successful_transaction_count' => $previousDay['successful_transaction_count'],
+                'transaction_volume' => $previousDay['transaction_volume'],
+                'estimated_earnings' => $previousDay['estimated_net_earnings'],
+                'earnings_provisional' => ! $previousDay['is_final'],
+            ];
+        }
         $baseUrl = rtrim((string) config('services.cencori.base_url'), '/');
 
         try {
@@ -54,7 +63,7 @@ final class BusinessInsightService
                     'messages' => [
                         [
                             'role' => 'system',
-                            'content' => 'Explain POS business day summaries to a Nigerian POS agent in plain language using at most 3 short sentences. POSPilot has already calculated every supplied value: never calculate, alter, estimate, or invent numbers. Refer only to supplied values. If provider fees are unknown or earnings_provisional is true, explicitly say earnings are provisional and fees are incomplete. If a value is null, say it was not recorded; never treat it as zero. Give one practical next step only when the supplied summary supports it.',
+                            'content' => 'Explain a Nigerian POS operator’s day in at most 4 short sentences: how today went, what changed if previous_day is supplied, what needs attention, and one practical next step supported by the data. POSPilot has calculated every value: never calculate, alter, or invent numbers. Do not compare periods when previous_day is absent. If provider fees are unknown or earnings_provisional is true, explicitly say earnings are provisional and fees are incomplete. If a value is null, say it was not recorded; never treat it as zero.',
                         ],
                         [
                             'role' => 'user',

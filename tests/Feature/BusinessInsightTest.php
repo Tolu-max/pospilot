@@ -71,6 +71,24 @@ class BusinessInsightTest extends TestCase
         $this->assertStringNotContainsString('PRIVATE-RRN-9988', $request->body());
     }
 
+    public function test_business_insight_includes_previous_day_only_when_activity_exists(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(['https://api.cencori.com/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Today is ready to review.']]]])]);
+        config(['services.cencori.enabled' => true, 'services.cencori.api_key' => 'test-secret-key']);
+        $user = User::factory()->create(['email_verified_at' => now()]);
+        $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
+        $provider = Provider::factory()->create();
+        Transaction::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id, 'amount' => '2400.00', 'transaction_at' => now()->subDay()]);
+
+        $this->actingAs($user)->postJson('/api/business-insight')->assertOk();
+
+        $request = Http::recorded()->first()[0];
+        $summary = json_decode($request->data()['messages'][1]['content'], true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame(1, $summary['previous_day']['successful_transaction_count']);
+        $this->assertSame('2400.00', $summary['previous_day']['transaction_volume']);
+    }
+
     public function test_business_insight_fails_gracefully_when_cencori_is_not_configured(): void
     {
         Http::preventStrayRequests();

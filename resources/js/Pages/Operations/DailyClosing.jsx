@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { usePage } from '@inertiajs/react';
 import AppShell from '../../Layouts/AppShell';
 import { api, money, today } from '../../lib/api';
 import { Button, Card, ErrorNotice, Field, LoadingCard, Notice, StatusPill } from '../../Components/PosPilotUI';
@@ -7,6 +8,7 @@ import { trackSafeEvent } from '../../lib/analytics';
 const friendlyReason = (reason) => ({ provider_balance_below_expected: 'Provider balance is below the expected amount', provider_balance_above_expected: 'Provider balance is above the expected amount', cash_mismatch: 'Cash count does not match the expected amount', pending_transaction: 'There are transactions still pending', reversal_affecting_expected_position: 'A reversal affects the expected position', unexplained_variance: 'There is a difference that needs checking' }[reason.type] || reason.type?.replaceAll('_', ' ') || 'Review this difference');
 
 export default function DailyClosing() {
+    const { workspace } = usePage().props;
     const [date, setDate] = useState(today());
     const [preview, setPreview] = useState(null);
     const [financialSummary, setFinancialSummary] = useState(null);
@@ -27,7 +29,7 @@ export default function DailyClosing() {
                 api(`/api/daily-closings/preview?closing_date=${encodeURIComponent(closingDate)}`),
                 api('/api/daily-closings?per_page=10'),
                 api(`/api/transactions?from=${closingDate}&to=${closingDate}&transaction_status=successful&per_page=100`),
-                api(`/api/financial-summary?from=${closingDate}&to=${closingDate}`),
+                workspace?.role === 'manager' ? Promise.resolve(null) : api(`/api/financial-summary?from=${closingDate}&to=${closingDate}`),
             ]);
             setPreview(data);
             setFinancialSummary(summary);
@@ -72,7 +74,7 @@ export default function DailyClosing() {
             setGroups([...groupsByBalanceKey.values()]);
         } catch (requestError) { setError(requestError); }
         finally { setLoading(false); }
-    }, [date]);
+    }, [date, workspace?.role]);
 
     useEffect(() => { load(); }, [load]);
 
