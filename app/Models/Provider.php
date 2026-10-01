@@ -42,4 +42,9 @@ class Provider extends Model
     {
         return $this->hasMany(ProviderConnection::class);
     }
+
+    public function accounts(): HasMany
+    {
+        return $this->hasMany(ProviderAccount::class);
+    }
 }

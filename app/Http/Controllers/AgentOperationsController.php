@@ -9,6 +9,7 @@ use App\Models\ChargeRule;
 use App\Models\Expense;
 use App\Models\ImportBatch;
 use App\Models\Provider;
+use App\Models\ProviderAccount;
 use App\Models\ProviderConnection;
 use App\Models\Terminal;
 use App\Models\Transaction;
@@ -66,11 +67,25 @@ final class AgentOperationsController extends Controller
 
     public function storeTerminal(Request $request)
     {
-        $validated = $request->validate(['provider_id' => ['required', 'integer', 'exists:providers,id'], 'name' => ['required', 'string', 'max:255'], 'terminal_identifier' => ['nullable', 'string', 'max:255'], 'active' => ['sometimes', 'boolean']]);
         $agent = $this->agent($request);
+        $validated = $request->validate([
+            'provider_id' => ['required', 'integer', 'exists:providers,id'],
+            'provider_account_id' => ['nullable', 'integer', Rule::exists('provider_accounts', 'id')->where('agent_profile_id', $agent->id)],
+            'name' => ['required', 'string', 'max:255'],
+            'terminal_identifier' => ['nullable', 'string', 'max:255'],
+            'active' => ['sometimes', 'boolean'],
+        ]);
+        if (isset($validated['provider_account_id'])) {
+            abort_unless(ProviderAccount::whereKey($validated['provider_account_id'])->where('provider_id', $validated['provider_id'])->exists(), 422, 'Choose an account for this provider.');
+        } else {
+            $accountIds = $agent->providerAccounts()->where('provider_id', $validated['provider_id'])->pluck('id');
+            if ($accountIds->count() === 1) {
+                $validated['provider_account_id'] = $accountIds->first();
+            }
+        }
         $terminal = $agent->terminals()->create($validated);
 
-        return response()->json($terminal->load('provider'), 201);
+        return response()->json($terminal->load(['provider', 'providerAccount']), 201);
     }
 
     public function updateTerminal(Request $request, Terminal $terminal)

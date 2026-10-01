@@ -31,8 +31,7 @@ class AccountSessionService
             'sessions' => $rows->map(fn (object $session): array => [
                 'id' => hash('sha256', $session->id),
                 'current' => hash_equals($currentSessionId, $session->id),
-                'ip_address' => $session->ip_address,
-                'user_agent' => $session->user_agent,
+                'browser' => $this->browserLabel($session->user_agent),
                 'last_active_at' => now()->setTimestamp((int) $session->last_activity)->toIso8601String(),
             ])->values()->all(),
         ];
@@ -52,6 +51,29 @@ class AccountSessionService
         return $deleted;
     }
 
+    public function revokeSession(User $user, string $sessionHash, string $currentSessionId): bool
+    {
+        $this->ensureDatabaseSessions();
+
+        $sessionIds = DB::table(config('session.table'))
+            ->where('user_id', $user->id)
+            ->where('id', '!=', $currentSessionId)
+            ->pluck('id');
+
+        foreach ($sessionIds as $sessionId) {
+            if (! hash_equals($sessionHash, hash('sha256', $sessionId))) {
+                continue;
+            }
+
+            return DB::table(config('session.table'))
+                ->where('id', $sessionId)
+                ->where('user_id', $user->id)
+                ->delete() === 1;
+        }
+
+        return false;
+    }
+
     public function revokeAllSessions(User $user): void
     {
         $this->ensureDatabaseSessions();
@@ -63,6 +85,29 @@ class AccountSessionService
     private function usesDatabaseSessions(): bool
     {
         return config('session.driver') === 'database';
+    }
+
+    private function browserLabel(?string $userAgent): string
+    {
+        $value = strtolower((string) $userAgent);
+        $browser = match (true) {
+            str_contains($value, 'edg/') => 'Edge',
+            str_contains($value, 'opr/') || str_contains($value, 'opera') => 'Opera',
+            str_contains($value, 'firefox/') => 'Firefox',
+            str_contains($value, 'chrome/') && ! str_contains($value, 'chromium') => 'Chrome',
+            str_contains($value, 'safari/') => 'Safari',
+            default => 'Unknown browser',
+        };
+        $platform = match (true) {
+            str_contains($value, 'windows') => 'Windows',
+            str_contains($value, 'android') => 'Android',
+            str_contains($value, 'iphone') || str_contains($value, 'ipad') => 'iOS',
+            str_contains($value, 'mac os') || str_contains($value, 'macintosh') => 'macOS',
+            str_contains($value, 'linux') => 'Linux',
+            default => null,
+        };
+
+        return $platform === null ? $browser : $browser.' on '.$platform;
     }
 
     private function ensureDatabaseSessions(): void

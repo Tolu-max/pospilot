@@ -6,7 +6,6 @@ use App\Models\GmailConnection;
 use App\Models\GmailStatementMessage;
 use App\Models\Provider;
 use App\Models\StatementMappingProfile;
-use App\Models\Terminal;
 use App\Services\GmailStatementImportService;
 use App\Services\GoogleGmailClient;
 use App\Services\XlsxStatementReader;
@@ -19,13 +18,15 @@ final class GmailStatementConnector
         private readonly GoogleGmailClient $gmail,
         private readonly GmailStatementImportService $imports,
         private readonly XlsxStatementReader $xlsx,
+        private readonly GmailPdfStatementReader $pdfReader,
+        private readonly PdfStatementTableReader $pdfTables,
     ) {}
 
     /** @return array{candidates_checked:int,statements_found:int} */
     public function sync(GmailConnection $connection, bool $includeOlder = false): array
     {
         $claimed = GmailConnection::whereKey($connection->id)
-            ->whereIn('status', ['connected', 'sync_error'])
+            ->whereIn('status', ['connected', 'sync_error', 'sync_queued'])
             ->update(['status' => 'syncing']);
         if ($claimed !== 1) {
             return ['candidates_checked' => 0, 'statements_found' => 0];
@@ -35,6 +36,7 @@ final class GmailStatementConnector
         $rules = (array) $connection->provider_rules;
         $candidatesChecked = 0;
         $statementsFound = 0;
+        $pendingCandidates = [];
         foreach ($rules as $slug => $rule) {
             $sender = strtolower(trim((string) ($rule['sender_email'] ?? '')));
             if ($sender !== '' && ! filter_var($sender, FILTER_VALIDATE_EMAIL)) {
@@ -46,17 +48,57 @@ final class GmailStatementConnector
             }
             $query = 'has:attachment '.($sender !== '' ? 'from:'.$sender.' ' : '').'subject:{statement settlement transaction report} '.$provider->name.' '.($includeOlder
                 ? 'newer_than:365d before:'.now()->subDays(30)->format('Y/m/d')
-                : ($connection->last_synced_at
-                    ? 'after:'.max(0, $connection->last_synced_at->timestamp)
-                    : 'newer_than:30d'));
+                : 'newer_than:30d');
             foreach ($this->gmail->search($connection, $query) as $candidate) {
                 if ($connection->fresh()?->status !== 'syncing') {
                     return ['candidates_checked' => $candidatesChecked, 'statements_found' => $statementsFound];
                 }
                 $candidatesChecked++;
-                if ($this->processCandidate($connection, $provider, $sender, $candidate['id'])) {
-                    $statementsFound++;
+                $messageFingerprint = hash_hmac('sha256', $connection->id.'|message|'.$candidate['id'], (string) config('app.key'));
+                $seenMessage = GmailStatementMessage::where('gmail_connection_id', $connection->id)
+                    ->where('processed_message_fingerprint', $messageFingerprint)->exists();
+                $retryablePdf = GmailStatementMessage::where('gmail_connection_id', $connection->id)
+                    ->where('processed_message_fingerprint', $messageFingerprint)
+                    ->where('file_type', 'pdf')
+                    ->where(function ($query): void {
+                        $query->where(function ($query): void {
+                            $query->where('status', 'unsupported_format')->where('failure_code', 'pdf_not_supported');
+                        })->orWhere(function ($query): void {
+                            $query->where('status', 'unsupported_schema')->whereIn('failure_code', ['unsupported_schema', 'pdf_no_pos_rows', 'pdf_table_unrecognized']);
+                        })->orWhere(function ($query): void {
+                            $query->where('status', 'needs_setup')->where('failure_code', 'activity_classification_required');
+                        });
+                    })->exists();
+                if ($seenMessage && ! $retryablePdf) {
+                    continue;
                 }
+                try {
+                    $metadata = $this->gmail->messageMetadata($connection, $candidate['id']);
+                } catch (RuntimeException) {
+                    continue;
+                }
+                $payloadHeaders = (array) data_get($metadata, 'payload.headers', []);
+                if (! $this->matchesProviderEvidence($payloadHeaders, $sender, $provider)) {
+                    continue;
+                }
+                $pendingCandidates[] = [
+                    'provider' => $provider,
+                    'sender' => $sender,
+                    'id' => $candidate['id'],
+                    'metadata' => $metadata,
+                    'received_at' => (int) ($metadata['internalDate'] ?? 0),
+                ];
+            }
+        }
+
+        usort($pendingCandidates, fn (array $first, array $second): int => $second['received_at'] <=> $first['received_at']
+            ?: strcmp($first['id'], $second['id']));
+        foreach ($pendingCandidates as $candidate) {
+            if ($connection->fresh()?->status !== 'syncing') {
+                return ['candidates_checked' => $candidatesChecked, 'statements_found' => $statementsFound];
+            }
+            if ($this->processCandidate($connection, $candidate['provider'], $candidate['sender'], $candidate['id'], $candidate['metadata'])) {
+                $statementsFound++;
             }
         }
         if ($connection->fresh()?->status === 'syncing') {
@@ -82,21 +124,11 @@ final class GmailStatementConnector
         });
     }
 
-    private function processCandidate(GmailConnection $connection, Provider $provider, string $expectedSender, string $messageId): bool
+    private function processCandidate(GmailConnection $connection, Provider $provider, string $expectedSender, string $messageId, array $messageMetadata): bool
     {
         $messageFingerprint = hash_hmac('sha256', $connection->id.'|message|'.$messageId, (string) config('app.key'));
-        if (GmailStatementMessage::where('gmail_connection_id', $connection->id)->where('processed_message_fingerprint', $messageFingerprint)->exists()) {
-            return false;
-        }
-
-        try {
-            $message = $this->gmail->messageMetadata($connection, $messageId);
-        } catch (RuntimeException) {
-            return false;
-        }
-        $payload = (array) ($message['payload'] ?? []);
-        $headers = (array) ($payload['headers'] ?? []);
-        if ($connection->fresh()?->status !== 'syncing' || ! $this->matchesProviderEvidence($headers, $expectedSender, $provider)) {
+        if ($connection->fresh()?->status !== 'syncing'
+            || ! $this->matchesProviderEvidence((array) data_get($messageMetadata, 'payload.headers', []), $expectedSender, $provider)) {
             return false;
         }
         try {
@@ -114,10 +146,14 @@ final class GmailStatementConnector
             }
             $dedupe = hash_hmac('sha256', $connection->id.'|'.$messageId.'|'.$attachmentId, (string) config('app.key'));
             $existing = GmailStatementMessage::where('gmail_connection_id', $connection->id)->where('dedupe_fingerprint', $dedupe)->first();
-            if ($existing && $existing->status !== 'failed') {
+            $retryUnsupportedPdf = $extension === 'pdf'
+                && ($existing?->status === 'unsupported_format' && $existing?->failure_code === 'pdf_not_supported'
+                    || $existing?->status === 'unsupported_schema' && in_array($existing?->failure_code, ['unsupported_schema', 'pdf_no_pos_rows', 'pdf_table_unrecognized'], true)
+                    || $existing?->status === 'needs_setup' && $existing?->failure_code === 'activity_classification_required');
+            if ($existing && $existing->status !== 'failed' && ! $retryUnsupportedPdf) {
                 continue;
             }
-            $receivedAt = isset($message['internalDate']) ? CarbonImmutable::createFromTimestampMs((int) $message['internalDate']) : null;
+            $receivedAt = isset($messageMetadata['internalDate']) ? CarbonImmutable::createFromTimestampMs((int) $messageMetadata['internalDate']) : null;
             $record = $existing ?? GmailStatementMessage::create([
                 'gmail_connection_id' => $connection->id,
                 'agent_profile_id' => $connection->agent_profile_id,
@@ -134,8 +170,8 @@ final class GmailStatementConnector
                 $record->update(['status' => 'discovered', 'failure_code' => null, 'headers' => null]);
             }
             $found = true;
-            if (! in_array($extension, ['csv', 'xlsx'], true)) {
-                $record->update(['status' => 'unsupported_format', 'failure_code' => $extension === 'pdf' ? 'pdf_not_supported' : 'xls_not_supported']);
+            if (! in_array($extension, ['csv', 'xlsx', 'pdf'], true)) {
+                $record->update(['status' => 'unsupported_format', 'failure_code' => 'xls_not_supported']);
 
                 continue;
             }
@@ -154,22 +190,89 @@ final class GmailStatementConnector
 
                     continue;
                 }
+                $attachmentFingerprint = hash_hmac('sha256', $connection->id.'|attachment|'.hash('sha256', $contents), (string) config('app.key'));
+                $record->update(['attachment_fingerprint' => $attachmentFingerprint]);
+                $matchingAttachments = GmailStatementMessage::where('gmail_connection_id', $connection->id)
+                    ->where('attachment_fingerprint', $attachmentFingerprint)
+                    ->where('id', '!=', $record->id);
+                $alreadyHandledAttachment = (clone $matchingAttachments)->whereIn('status', ['processed', 'needs_setup'])->exists();
+                $newestAttachment = (clone $matchingAttachments)->orderByDesc('received_at')->orderByDesc('id')->first();
+                $isNewestAttachment = ! $newestAttachment
+                    || ($record->received_at?->greaterThan($newestAttachment->received_at) ?? false)
+                    || ($record->received_at?->equalTo($newestAttachment->received_at) === true && $record->id > $newestAttachment->id);
+                if ($alreadyHandledAttachment || ! $isNewestAttachment) {
+                    $record->update([
+                        'status' => 'duplicate_attachment',
+                        'failure_code' => null,
+                    ]);
+
+                    continue;
+                }
+                $activityScope = 'pos_terminal';
+                $activitySummary = null;
                 if ($extension === 'xlsx') {
                     $contents = $this->xlsx->toCsv($contents);
+                } elseif ($extension === 'pdf') {
+                    $pages = $this->pdfReader->extractPositionedPages($contents);
+                    $table = $this->pdfTables->toCsvFromPositionedPages($pages, $provider->slug);
+                    $contents = $table['csv'];
+                    $activityScope = $table['activity_scope'];
+                    $activitySummary = $table['activity_summary'];
+                    if ($activitySummary['pos'] === 0 && $activitySummary['ambiguous'] === 0) {
+                        $record->update([
+                            'status' => 'processed',
+                            'failure_code' => 'no_pos_activity',
+                            'headers' => null,
+                            'activity_summary' => $activitySummary,
+                            'temporary_file_path' => null,
+                        ]);
+
+                        continue;
+                    }
                 }
                 $schema = $this->imports->inspect($contents);
                 $record->update([
                     'headers' => $schema['headers'],
                     'masked_account_identifier' => $this->imports->maskedAccountHint($contents, $schema['headers']),
                     'status' => 'needs_setup',
+                    'failure_code' => $activityScope === 'personal_wallet'
+                        ? 'personal_wallet_statement'
+                        : (($activitySummary['ambiguous'] ?? 0) > 0 ? 'activity_classification_required' : null),
+                    'activity_summary' => $activitySummary,
                 ]);
                 $this->imports->retainForMapping($record, $contents);
-                $profile = $this->matchingProfile($record, $schema['fingerprint'], $schema['headers'], $contents);
+                $accountType = (string) data_get($connection->provider_rules, $provider->slug.'.account_type', 'mixed_personal_pos');
+                $importedConfidentPdf = $extension === 'pdf' && $this->imports->importConfidentPdf($record, $accountType);
+                $profile = $importedConfidentPdf
+                    ? null
+                    : $this->matchingProfile($record, $schema['fingerprint'], $schema['headers'], $contents);
                 if ($profile) {
-                    $this->imports->process($record, $profile);
+                    if ($this->hasUnreviewedActivityPatterns($activitySummary, $profile)) {
+                        $record->update([
+                            'statement_mapping_profile_id' => $profile->id,
+                            'status' => 'needs_setup',
+                            'failure_code' => 'activity_classification_required',
+                        ]);
+                    } else {
+                        $this->imports->process($record, $profile);
+                    }
                 }
             } catch (RuntimeException $exception) {
-                $record->update(['status' => 'unsupported_schema', 'failure_code' => $exception->getMessage() === 'unsupported_schema' ? 'unsupported_schema' : 'attachment_read_failed']);
+                $failureCode = match ($exception->getMessage()) {
+                    'pdf_scanned_unsupported' => 'pdf_scanned_unsupported',
+                    'pdf_page_limit_exceeded' => 'pdf_page_limit_exceeded',
+                    'pdf_parse_failed' => 'pdf_parse_failed',
+                    'pdf_no_pos_rows' => 'pdf_no_pos_rows',
+                    'pdf_no_activity_rows' => 'pdf_no_pos_rows',
+                    'unsupported_schema' => $extension === 'pdf' ? 'pdf_table_unrecognized' : 'unsupported_schema',
+                    default => 'unsupported_schema',
+                };
+                $record->update([
+                    'status' => $failureCode === 'pdf_no_pos_rows'
+                        ? 'needs_setup'
+                        : (in_array($failureCode, ['pdf_scanned_unsupported', 'pdf_page_limit_exceeded', 'pdf_parse_failed'], true) ? 'unsupported_format' : 'unsupported_schema'),
+                    'failure_code' => $failureCode,
+                ]);
             }
         }
 
@@ -203,7 +306,7 @@ final class GmailStatementConnector
 
     private function matchingProfile(GmailStatementMessage $message, string $fingerprint, array $headers, string $contents): ?StatementMappingProfile
     {
-        $profiles = StatementMappingProfile::where('agent_profile_id', $message->agent_profile_id)
+        $profiles = StatementMappingProfile::with('providerAccount')->where('agent_profile_id', $message->agent_profile_id)
             ->where('provider_id', $message->provider_id)->where('schema_fingerprint', $fingerprint)->where('status', 'active')->get();
         if ($profiles->isEmpty()) {
             return null;
@@ -212,10 +315,7 @@ final class GmailStatementConnector
             $column = $this->imports->identityColumn($profile->column_mapping);
             $index = is_string($column) ? $this->headerIndex($headers, $column) : false;
             if ($index === false) {
-                $terminalCount = Terminal::where('agent_profile_id', $profile->agent_profile_id)
-                    ->where('provider_id', $profile->provider_id)->where('active', true)->count();
-
-                return $terminalCount === 1 && $profile->match_identifier_fingerprint === null;
+                return false;
             }
             $identifier = $index === false ? '' : $this->singleIdentifier($contents, $index);
 
@@ -226,6 +326,15 @@ final class GmailStatementConnector
         }
 
         return null;
+    }
+
+    /** @param array<string, mixed>|null $summary */
+    private function hasUnreviewedActivityPatterns(?array $summary, StatementMappingProfile $profile): bool
+    {
+        $observed = array_column(array_filter((array) ($summary['patterns'] ?? []), fn (array $pattern): bool => (bool) ($pattern['selectable'] ?? true)), 'id');
+        $reviewed = (array) ($profile->column_mapping['_reviewed_activity_patterns'] ?? []);
+
+        return array_diff($observed, $reviewed) !== [];
     }
 
     private function headerIndex(array $headers, string $column): int|false
@@ -246,9 +355,9 @@ final class GmailStatementConnector
         $handle = fopen('php://temp', 'w+b');
         fwrite($handle, $contents);
         rewind($handle);
-        fgetcsv($handle);
+        fgetcsv($handle, null, ',', '"', '');
         $identifiers = [];
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
             $identifier = strtolower(trim((string) ($row[$columnIndex] ?? '')));
             if ($identifier !== '') {
                 $identifiers[$identifier] = true;

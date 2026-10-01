@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BusinessShift extends Model
 {
-    protected $fillable = ['agent_profile_id', 'business_membership_id', 'terminal_id', 'started_at', 'ended_at', 'opening_cash', 'closing_cash', 'status'];
+    protected $fillable = ['agent_profile_id', 'business_membership_id', 'terminal_id', 'started_at', 'ended_at', 'opening_cash', 'closing_cash', 'closing_notes', 'status'];
 
     protected function casts(): array
     {

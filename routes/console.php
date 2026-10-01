@@ -14,3 +14,8 @@ Schedule::job(new SyncConnectedGmailStatements)
     ->withoutOverlapping(30)
     ->onOneServer()
     ->when(fn (): bool => (bool) config('gmail_statement.enabled'));
+
+Schedule::command('pospilot:send-business-reminders')
+    ->dailyAt('18:30')
+    ->timezone('Africa/Lagos')
+    ->withoutOverlapping();

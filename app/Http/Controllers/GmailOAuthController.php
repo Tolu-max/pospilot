@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Contracts\GmailCredentialStore;
 use App\Exceptions\GmailCredentialStoreUnavailable;
+use App\Jobs\SyncConnectedGmailStatements;
 use App\Models\GmailConnection;
+use App\Notifications\SecurityAlertNotification;
 use App\Services\GmailIntegrationConfiguration;
 use App\Services\GoogleGmailClient;
+use App\Services\SecurityEventRecorder;
+use App\Services\TransactionalEmailDelivery;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -41,7 +45,7 @@ final class GmailOAuthController extends Controller
         return redirect()->away('https://accounts.google.com/o/oauth2/v2/auth?'.$query);
     }
 
-    public function callback(Request $request, GmailCredentialStore $credentials, GoogleGmailClient $gmail, GmailIntegrationConfiguration $configuration): RedirectResponse
+    public function callback(Request $request, GmailCredentialStore $credentials, GoogleGmailClient $gmail, GmailIntegrationConfiguration $configuration, SecurityEventRecorder $events, TransactionalEmailDelivery $delivery): RedirectResponse
     {
         abort_unless(config('gmail_statement.enabled'), 404);
         abort_unless($configuration->isConfigured(), 503, 'Gmail connection is not configured.');
@@ -109,11 +113,12 @@ final class GmailOAuthController extends Controller
             $localPart = strstr($emailAddress, '@', true) ?: '';
             $domain = substr(strstr($emailAddress, '@') ?: '', 1);
             $connection->update([
-                'status' => 'connected',
+                'status' => 'sync_queued',
                 'gmail_address_masked' => mb_substr($localPart, 0, 1).'••••@'.$domain,
                 'connected_at' => now(),
                 'disconnected_at' => null,
                 'last_error_code' => null,
+                'last_sync_status' => 'queued',
             ]);
         } catch (GmailCredentialStoreUnavailable) {
             if ($connection?->status === 'connecting') {
@@ -129,12 +134,28 @@ final class GmailOAuthController extends Controller
             return redirect('/dashboard?screen=providers')->with('gmail_error', 'Gmail could not be connected. Check the Google setup and try again.');
         }
 
+        try {
+            SyncConnectedGmailStatements::dispatch($connection->id);
+        } catch (Throwable) {
+            $connection->update(['status' => 'connected', 'last_sync_status' => 'failed', 'last_error_code' => 'gmail_sync_queue_failed']);
+        }
+
+        $events->record($request->user(), 'gmail_connected', $request, ['provider' => 'gmail']);
+        $delivery->send(
+            fn () => $request->user()->notify(new SecurityAlertNotification(
+                'Gmail was connected to POSPilot',
+                'A Gmail account was connected for provider statement processing. If you did not make this change, disconnect Gmail from POSPilot and secure your account.',
+                'POSPilot does not include statement contents or transaction details in this notification.',
+            )),
+            'gmail_connected',
+        );
+
         return redirect('/dashboard?screen=providers')
-            ->with('gmail_status', 'Gmail connected. Configure provider sender rules to begin matching statement emails.')
+            ->with('gmail_status', 'Gmail connected. POSPilot is checking recent statement emails.')
             ->with('analytics_event', ['name' => 'gmail_connected', 'id' => (string) Str::uuid()]);
     }
 
-    public function disconnect(Request $request, GmailCredentialStore $credentials): RedirectResponse
+    public function disconnect(Request $request, GmailCredentialStore $credentials, SecurityEventRecorder $events, TransactionalEmailDelivery $delivery): RedirectResponse
     {
         $connection = GmailConnection::where('agent_profile_id', $request->user()->businessAgentProfile()?->id)->first();
         if ($connection) {
@@ -161,6 +182,15 @@ final class GmailOAuthController extends Controller
                 'last_error_code' => null,
                 'disconnected_at' => now(),
             ]);
+            $events->record($request->user(), 'gmail_disconnected', $request, ['provider' => 'gmail']);
+            $delivery->send(
+                fn () => $request->user()->notify(new SecurityAlertNotification(
+                    'Gmail was disconnected from POSPilot',
+                    'Gmail access was removed from your POSPilot workspace. Future statement searches have stopped.',
+                    'This notification does not include mailbox or statement contents.',
+                )),
+                'gmail_disconnected',
+            );
         }
 
         return redirect('/dashboard?screen=providers')->with('gmail_status', 'Gmail disconnected. POSPilot stopped statement discovery.');

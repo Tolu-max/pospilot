@@ -33,6 +33,8 @@ final readonly class NormalizedTransactionData
         public array $adjustments = [],
         public bool $providerFeeComponentsComplete = false,
         public bool $providerFeeSupplied = true,
+        public ?int $providerAccountId = null,
+        public ?int $terminalId = null,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -121,13 +123,15 @@ final readonly class NormalizedTransactionData
             adjustments: $adjustments,
             providerFeeComponentsComplete: $componentsComplete,
             providerFeeSupplied: $providerFeeSupplied,
+            providerAccountId: isset($data['provider_account_id']) ? (int) $data['provider_account_id'] : null,
+            terminalId: isset($data['terminal_id']) ? (int) $data['terminal_id'] : null,
         );
     }
 
     /** @return array<string, mixed> */
     public function toArray(): array
     {
-        return ['external_reference' => $this->externalReference, 'terminal_identifier' => $this->terminalIdentifier, 'transaction_type' => $this->transactionType, 'amount' => $this->amount, 'provider_fee' => $this->providerFee, 'provider_fee_supplied' => $this->providerFeeSupplied, 'customer_charge' => $this->customerCharge, 'transaction_status' => $this->status->value, 'transaction_at' => $this->transactionAt->toIso8601String(), 'settlement_status' => $this->settlementStatus?->value, 'settled_at' => $this->settledAt?->toIso8601String(), 'source' => $this->source->value, 'customer_charge_source' => $this->customerChargeSource instanceof CustomerChargeSource ? $this->customerChargeSource->value : $this->customerChargeSource, 'adjustments' => array_map(fn (NormalizedTransactionAdjustmentData $adjustment): array => $adjustment->toArray(), $this->adjustments), 'provider_fee_components_complete' => $this->providerFeeComponentsComplete, 'metadata' => $this->metadata];
+        return ['external_reference' => $this->externalReference, 'terminal_identifier' => $this->terminalIdentifier, 'terminal_id' => $this->terminalId, 'provider_account_id' => $this->providerAccountId, 'transaction_type' => $this->transactionType, 'amount' => $this->amount, 'provider_fee' => $this->providerFee, 'provider_fee_supplied' => $this->providerFeeSupplied, 'customer_charge' => $this->customerCharge, 'transaction_status' => $this->status->value, 'transaction_at' => $this->transactionAt->toIso8601String(), 'settlement_status' => $this->settlementStatus?->value, 'settled_at' => $this->settledAt?->toIso8601String(), 'source' => $this->source->value, 'customer_charge_source' => $this->customerChargeSource instanceof CustomerChargeSource ? $this->customerChargeSource->value : $this->customerChargeSource, 'adjustments' => array_map(fn (NormalizedTransactionAdjustmentData $adjustment): array => $adjustment->toArray(), $this->adjustments), 'provider_fee_components_complete' => $this->providerFeeComponentsComplete, 'metadata' => $this->metadata];
     }
 
     private static function nullableString(mixed $value): ?string

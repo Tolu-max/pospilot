@@ -15,7 +15,7 @@ class SyncConnectedGmailStatements implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public function __construct(public readonly ?int $connectionId = null) {}
+    public function __construct(public readonly ?int $connectionId = null, public readonly bool $includeOlder = false) {}
 
     public int $tries = 2;
 
@@ -32,6 +32,13 @@ class SyncConnectedGmailStatements implements ShouldBeUnique, ShouldQueue
 
     public function handle(GmailStatementConnector $connector): void
     {
+        $staleConnections = GmailConnection::where('status', 'syncing')
+            ->where('updated_at', '<', now()->subMinutes(10));
+        if ($this->connectionId !== null) {
+            $staleConnections->whereKey($this->connectionId);
+        }
+        $staleConnections->update(['status' => 'sync_error', 'last_sync_status' => 'failed', 'last_error_code' => 'gmail_sync_interrupted']);
+
         $expiredMessages = GmailStatementMessage::where('status', 'needs_setup')
             ->where('created_at', '<', now()->subDays(7));
         if ($this->connectionId !== null) {
@@ -51,7 +58,7 @@ class SyncConnectedGmailStatements implements ShouldBeUnique, ShouldQueue
         $connections = GmailConnection::query();
         if ($this->connectionId !== null) {
             $connection = $connections->whereKey($this->connectionId)
-                ->whereIn('status', ['connected', 'sync_error'])
+                ->whereIn('status', ['connected', 'sync_error', 'sync_queued'])
                 ->first();
             if (! $connection) {
                 return;
@@ -61,7 +68,7 @@ class SyncConnectedGmailStatements implements ShouldBeUnique, ShouldQueue
 
             return;
         }
-        $connections->where('status', 'connected')->orderBy('id')->chunkById(50, function ($connections) use ($connector): void {
+        $connections->whereIn('status', ['connected', 'sync_error', 'sync_queued'])->orderBy('id')->chunkById(50, function ($connections) use ($connector): void {
             foreach ($connections as $connection) {
                 $this->syncConnection($connection, $connector);
             }
@@ -71,7 +78,7 @@ class SyncConnectedGmailStatements implements ShouldBeUnique, ShouldQueue
     private function syncConnection(GmailConnection $connection, GmailStatementConnector $connector): void
     {
         try {
-            $connector->sync($connection);
+            $connector->sync($connection, $this->includeOlder);
         } catch (Throwable) {
             $connection->update(['status' => 'sync_error', 'last_sync_status' => 'failed']);
         }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { usePage } from '@inertiajs/react';
 import AppShell from '../../Layouts/AppShell';
 import { api, money, today } from '../../lib/api';
 import { Button, Card, ErrorNotice, Field, LoadingCard, Notice, StatusPill } from '../../Components/PosPilotUI';
@@ -7,6 +8,7 @@ import { trackSafeEvent } from '../../lib/analytics';
 const friendlyReason = (reason) => ({ provider_balance_below_expected: 'Provider balance is below the expected amount', provider_balance_above_expected: 'Provider balance is above the expected amount', cash_mismatch: 'Cash count does not match the expected amount', pending_transaction: 'There are transactions still pending', reversal_affecting_expected_position: 'A reversal affects the expected position', unexplained_variance: 'There is a difference that needs checking' }[reason.type] || reason.type?.replaceAll('_', ' ') || 'Review this difference');
 
 export default function DailyClosing() {
+    const { workspace } = usePage().props;
     const [date, setDate] = useState(today());
     const [preview, setPreview] = useState(null);
     const [financialSummary, setFinancialSummary] = useState(null);
@@ -27,7 +29,7 @@ export default function DailyClosing() {
                 api(`/api/daily-closings/preview?closing_date=${encodeURIComponent(closingDate)}`),
                 api('/api/daily-closings?per_page=10'),
                 api(`/api/transactions?from=${closingDate}&to=${closingDate}&transaction_status=successful&per_page=100`),
-                api(`/api/financial-summary?from=${closingDate}&to=${closingDate}`),
+                workspace?.role === 'manager' ? Promise.resolve(null) : api(`/api/financial-summary?from=${closingDate}&to=${closingDate}`),
             ]);
             setPreview(data);
             setFinancialSummary(summary);
@@ -40,14 +42,39 @@ export default function DailyClosing() {
                 remainingPages.forEach((result) => txRows.push(...(result.data || [])));
             }
             const existingSnapshots = data.closing?.provider_balance_snapshots || [];
-            setBalances(Object.fromEntries(existingSnapshots.map((snapshot) => [snapshot.provider_id, snapshot.actual_balance || ''])));
-            const byProvider = new Map();
-            txRows.forEach((row) => { if (!byProvider.has(row.provider_id)) byProvider.set(row.provider_id, { provider_id: row.provider_id, name: row.provider?.name || 'Provider', actual_balance: '' }); });
-            existingSnapshots.forEach((snapshot) => { if (!byProvider.has(snapshot.provider_id)) byProvider.set(snapshot.provider_id, { provider_id: snapshot.provider_id, name: snapshot.provider?.name || 'Provider', actual_balance: snapshot.actual_balance || '' }); else byProvider.get(snapshot.provider_id).actual_balance = snapshot.actual_balance || ''; });
-            setGroups([...byProvider.values()]);
+            const balanceKey = (providerId, terminalId) => `${providerId}:${terminalId ?? 'all'}`;
+            const providerRows = new Map();
+            txRows.forEach((row) => {
+                if (!providerRows.has(row.provider_id)) providerRows.set(row.provider_id, { provider: row.provider, terminalRows: new Map(), hasUnmappedTerminal: false, hasProviderSnapshot: false });
+                const providerRow = providerRows.get(row.provider_id);
+                if (row.terminal_id === null || row.terminal_id === undefined) providerRow.hasUnmappedTerminal = true;
+                else providerRow.terminalRows.set(row.terminal_id, row.terminal);
+            });
+            existingSnapshots.forEach((snapshot) => {
+                if (!providerRows.has(snapshot.provider_id)) providerRows.set(snapshot.provider_id, { provider: snapshot.provider, terminalRows: new Map(), hasUnmappedTerminal: snapshot.terminal_id === null, hasProviderSnapshot: snapshot.terminal_id === null });
+                if (snapshot.terminal_id === null) providerRows.get(snapshot.provider_id).hasProviderSnapshot = true;
+                if (snapshot.terminal_id !== null) providerRows.get(snapshot.provider_id).terminalRows.set(snapshot.terminal_id, snapshot.terminal);
+            });
+            const groupsByBalanceKey = new Map();
+            providerRows.forEach((providerRow, providerId) => {
+                const providerName = providerRow.provider?.name || 'Provider';
+                if (providerRow.hasUnmappedTerminal || providerRow.hasProviderSnapshot || providerRow.terminalRows.size === 0) {
+                    const key = balanceKey(providerId, null);
+                    const snapshot = existingSnapshots.find((item) => item.provider_id === providerId && item.terminal_id === null);
+                    groupsByBalanceKey.set(key, { key, provider_id: providerId, terminal_id: null, name: providerName, actual_balance: snapshot?.actual_balance || '' });
+                    return;
+                }
+                providerRow.terminalRows.forEach((terminal, terminalId) => {
+                    const key = balanceKey(providerId, terminalId);
+                    const snapshot = existingSnapshots.find((item) => item.provider_id === providerId && item.terminal_id === terminalId);
+                    groupsByBalanceKey.set(key, { key, provider_id: providerId, terminal_id: terminalId, name: `${providerName} · ${terminal?.name || 'Terminal'}`, actual_balance: snapshot?.actual_balance || '' });
+                });
+            });
+            setBalances(Object.fromEntries([...groupsByBalanceKey.values()].map((group) => [group.key, group.actual_balance])));
+            setGroups([...groupsByBalanceKey.values()]);
         } catch (requestError) { setError(requestError); }
         finally { setLoading(false); }
-    }, [date]);
+    }, [date, workspace?.role]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -70,11 +97,11 @@ export default function DailyClosing() {
             }
             if (current.status === 'finalized') throw new Error('This day has already been finalized and cannot be changed.');
             for (const group of groups) {
-                const formBalance = submittedValues[`balance_${group.provider_id}`];
-                if (formBalance === undefined && balances[group.provider_id] === undefined && group.actual_balance === '') continue;
-                const actual = formBalance ?? balances[group.provider_id] ?? group.actual_balance;
+                const formBalance = submittedValues[`balance_${group.key}`];
+                if (formBalance === undefined && balances[group.key] === undefined && group.actual_balance === '') continue;
+                const actual = formBalance ?? balances[group.key] ?? group.actual_balance;
                 if (actual === '') continue;
-                await api(`/api/daily-closings/${current.id}/balances`, { method: 'POST', body: { provider_id: group.provider_id, actual_balance: actual } });
+                await api(`/api/daily-closings/${current.id}/balances`, { method: 'POST', body: { provider_id: group.provider_id, terminal_id: group.terminal_id, actual_balance: actual } });
             }
             setSuccess(shouldCheck ? 'Check complete. Review the expected and actual amounts below before finalizing.' : 'Your daily closing draft has been saved.');
             setDate(closingDate);
@@ -113,7 +140,7 @@ export default function DailyClosing() {
             </Card>
             <Card><h2 className="text-lg font-extrabold">What the totals mean</h2><p className="mt-2 text-sm leading-6 text-slate-600">Transaction principal is not earnings. POSPilot uses the transaction types and verified provider deductions on record to estimate the position.</p><p className="mt-4 text-sm font-semibold text-slate-700">A finalized closing is locked to protect the record.</p></Card></div>
             <Card className="mt-5"><h2 className="text-lg font-extrabold">Enter the balances you can see</h2><p className="mt-1 text-sm text-slate-600">POSPilot will save a draft, compare your balances, and show the result before you finalize.</p><form onSubmit={(event) => saveProgress(event, false)} className="mt-5 space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Cash at start of day (needed for cash comparison)" name="opening_cash" inputMode="decimal" value={values.opening_cash} disabled={finalized} onChange={(event) => { setValues({ ...values, opening_cash: event.target.value }); setChecked(false); }} /><Field label="Cash in hand at close" name="entered_closing_cash" inputMode="decimal" value={values.entered_closing_cash} disabled={finalized} onChange={(event) => { setValues({ ...values, entered_closing_cash: event.target.value }); setChecked(false); }} /></div>
-                {groups.length > 0 ? <div><h3 className="font-bold">Provider balances</h3><p className="mt-1 text-sm text-slate-600">Enter the balance shown in each provider’s official app. Providers with successful activity need a balance before the day can be finalized.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{groups.map((group) => <Field key={group.provider_id} label={`${group.name} balance`} name={`balance_${group.provider_id}`} inputMode="decimal" placeholder="0.00" value={balances[group.provider_id] ?? group.actual_balance} disabled={finalized} onChange={(event) => { setBalances({ ...balances, [group.provider_id]: event.target.value }); setChecked(false); }} />)}</div></div> : <Notice tone="info">There are no successful transactions for this date, so there are no provider balances to enter.</Notice>}
+                {groups.length > 0 ? <div><h3 className="font-bold">Provider balances</h3><p className="mt-1 text-sm text-slate-600">Enter the balance shown in each provider’s official app. When transactions are mapped to terminals, balances are checked per terminal. Providers with successful activity need a balance before the day can be finalized.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{groups.map((group) => <Field key={group.key} label={`${group.name} balance`} name={`balance_${group.key}`} inputMode="decimal" placeholder="0.00" value={balances[group.key] ?? group.actual_balance} disabled={finalized} onChange={(event) => { setBalances({ ...balances, [group.key]: event.target.value }); setChecked(false); }} />)}</div></div> : <Notice tone="info">There are no successful transactions for this date, so there are no provider balances to enter.</Notice>}
                 <label className="block text-sm font-semibold">Note (optional)<textarea name="notes" rows="3" value={values.notes} disabled={finalized} onChange={(event) => { setValues({ ...values, notes: event.target.value }); setChecked(false); }} className="mt-2 w-full rounded-xl border-brand-line px-4 py-3 font-normal focus:border-brand-accent focus:ring-brand-accent" /></label>
                 {preview.requires_attention && <p className="text-sm font-medium text-amber-900">Some required amounts are still missing. You can save the information, then come back to finalize when ready.</p>}
                 <div className="flex flex-wrap gap-3"><Button type="submit" variant="secondary" disabled={busy || finalized}>{busy ? 'Saving…' : 'Save draft'}</Button>{!finalized && <Button type="button" disabled={busy} onClick={(event) => saveProgress(event, true)}>{busy ? 'Checking…' : 'Check my closing'}</Button>}{checked && !finalized && <Button type="button" variant="secondary" disabled={busy || preview.requires_attention} onClick={finalizeDay}>{busy ? 'Finalizing…' : 'Finalize day'}</Button>}{finalized && <StatusPill tone="good">Finalized</StatusPill>}</div>

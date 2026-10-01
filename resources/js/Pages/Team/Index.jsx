@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 export default function TeamIndex({ businessName }) {
     const [data, setData] = useState(null);
     const [activity, setActivity] = useState([]);
+    const [securityActivity, setSecurityActivity] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
@@ -16,7 +17,7 @@ export default function TeamIndex({ businessName }) {
     async function load() {
         setLoading(true);
         setError('');
-        try { const [team, shifts] = await Promise.all([api('/api/team/members'), api('/api/team/activity')]); setData(team); setActivity(shifts.data || []); } catch (requestError) { setError(requestError.message); } finally { setLoading(false); }
+        try { const [team, shifts, security] = await Promise.all([api('/api/team/members'), api('/api/team/activity'), api('/api/team/security-activity')]); setData(team); setActivity(shifts.data || []); setSecurityActivity(security.data || []); } catch (requestError) { setError(requestError.message); } finally { setLoading(false); }
     }
 
     useEffect(() => { load(); }, []);
@@ -74,6 +75,11 @@ export default function TeamIndex({ businessName }) {
                 {loading && <div className="mt-4"><LoadingCard label="Loading staff activity…" /></div>}
                 {!loading && activity.length === 0 && <div className="mt-4"><EmptyState title="No staff shifts yet" description="Attendant shift activity will appear here as your team starts using assigned terminals." /></div>}
                 {!loading && activity.length > 0 && <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[42rem] text-left text-sm"><thead><tr className="border-b border-brand-line text-slate-600"><th className="pb-3">Staff member</th><th className="pb-3">Terminal</th><th className="pb-3">Started</th><th className="pb-3">Status</th><th className="pb-3">Closing cash</th><th className="pb-3">Issues</th></tr></thead><tbody>{activity.map((shift) => <tr key={shift.id} className="border-b border-brand-line"><td className="py-3 font-semibold">{shift.staff}</td><td>{shift.terminal}</td><td>{new Date(shift.started_at).toLocaleString()}</td><td className="capitalize">{shift.status}</td><td>{shift.closing_cash === null ? '—' : `₦${Number(shift.closing_cash).toLocaleString('en-NG')}`}</td><td>{shift.issues?.map((issue) => <span key={issue.id} className="mr-2 inline-flex items-center gap-2 py-1">{issue.subject} · {issue.status}{issue.status === 'open' && <Button type="button" variant="secondary" onClick={async () => { try { await api(`/api/team/issues/${issue.id}/resolve`, { method: 'POST', body: {} }); setNotice('Issue marked resolved.'); await load(); } catch (requestError) { setError(requestError.message); } }}>Resolve</Button>}</span>)}</td></tr>)}</tbody></table></div>}
+            </Card>
+            <Card><div><h2 className="text-lg font-bold text-brand-ink">Security activity</h2><p className="mt-1 text-sm text-slate-600">Recent sign-ins and important access changes for this business.</p></div>
+                {loading && <div className="mt-4"><LoadingCard label="Loading security activity…" /></div>}
+                {!loading && securityActivity.length === 0 && <div className="mt-4"><EmptyState title="No security activity yet" description="Important sign-ins and team access changes will appear here." /></div>}
+                {!loading && securityActivity.length > 0 && <ul className="mt-4 divide-y divide-brand-line">{securityActivity.map((item) => <li key={item.id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-brand-ink">{item.actor} · {item.event.replaceAll('_', ' ')}</p>{item.details?.role && <p className="text-sm capitalize text-slate-600">Role: {item.details.role}</p>}</div><time className="text-sm text-slate-600">{new Date(item.occurred_at).toLocaleString()}</time></li>)}</ul>}
             </Card>
         </div>
     </AppShell>;

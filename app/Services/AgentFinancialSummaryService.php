@@ -13,7 +13,7 @@ final class AgentFinancialSummaryService
 
     public function summarize(AgentProfile $agent, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
     {
-        $transactions = $agent->transactions()->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
+        $transactions = $agent->transactions()->posFinancial()->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
         $earnings = $this->earnings->summarize($agent, $from, $to);
         $successful = $transactions->where('transaction_status', TransactionStatus::Successful);
         $issues = $this->reconciliation->issuesForAgent($agent, $from, $to);

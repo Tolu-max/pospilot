@@ -14,11 +14,11 @@ class Settlement extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['agent_profile_id', 'provider_id', 'terminal_id', 'import_batch_id', 'settlement_reference', 'gross_transaction_amount', 'provider_fee', 'expected_amount', 'actual_amount', 'settlement_date', 'status', 'reconciliation_outcome', 'source', 'import_fingerprint', 'metadata'];
+    protected $fillable = ['agent_profile_id', 'provider_id', 'terminal_id', 'import_batch_id', 'settlement_reference', 'gross_transaction_amount', 'provider_fee', 'provider_fee_supplied', 'expected_amount', 'actual_amount', 'settlement_date', 'status', 'reconciliation_outcome', 'source', 'import_fingerprint', 'metadata'];
 
     protected function casts(): array
     {
-        return ['gross_transaction_amount' => 'decimal:2', 'provider_fee' => 'decimal:2', 'expected_amount' => 'decimal:2', 'actual_amount' => 'decimal:2', 'settlement_date' => 'date', 'status' => SettlementStatus::class, 'reconciliation_outcome' => ReconciliationOutcome::class, 'source' => TransactionSource::class, 'metadata' => 'array'];
+        return ['gross_transaction_amount' => 'decimal:2', 'provider_fee' => 'decimal:2', 'provider_fee_supplied' => 'boolean', 'expected_amount' => 'decimal:2', 'actual_amount' => 'decimal:2', 'settlement_date' => 'date', 'status' => SettlementStatus::class, 'reconciliation_outcome' => ReconciliationOutcome::class, 'source' => TransactionSource::class, 'metadata' => 'array'];
     }
 
     public function agentProfile(): BelongsTo

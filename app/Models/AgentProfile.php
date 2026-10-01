@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class AgentProfile extends Model
 {
@@ -80,8 +81,23 @@ class AgentProfile extends Model
         return $this->hasMany(ProviderConnection::class);
     }
 
+    public function providerAccounts(): HasMany
+    {
+        return $this->hasMany(ProviderAccount::class);
+    }
+
     public function dailyClosings(): HasMany
     {
         return $this->hasMany(DailyClosing::class);
+    }
+
+    public function securityEvents(): HasMany
+    {
+        return $this->hasMany(SecurityEvent::class);
+    }
+
+    public function notificationPreference(): HasOne
+    {
+        return $this->hasOne(BusinessNotificationPreference::class);
     }
 }

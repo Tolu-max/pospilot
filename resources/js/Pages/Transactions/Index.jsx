@@ -65,7 +65,7 @@ export default function Index() {
     const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
     return <AppShell title="Transactions"><div className="transactions-page">
-        <div className="transactions-heading"><div><span className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS ACTIVITY</span><h1>Transactions</h1><p>Review your POS activity and the earnings recorded for each transaction.</p></div></div>
+        <div className="transactions-heading"><div><span className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS ACTIVITY</span><h1>Transactions</h1><p>Review POS activity and imported statements. Personal wallet test activity is labeled and excluded from POS earnings.</p></div></div>
         <form onSubmit={submit} className="transactions-filter-bar" aria-label="Transaction filters">
             <label className="tx-filter-select"><span>Provider</span><select name="provider_id" value={filters.provider_id} onChange={(event) => update('provider_id', event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
             <label className="tx-filter-select"><span>Terminal</span><select name="terminal_id" value={filters.terminal_id} onChange={(event) => update('terminal_id', event.target.value)}><option value="">All terminals</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}</select></label>
@@ -84,10 +84,10 @@ export default function Index() {
                 <div className="tx-table-scroll"><table className="tx-table"><thead><tr><th>Date &amp; time</th><th>Provider / terminal</th><th>Reference</th><th>Amount</th><th>Earnings</th><th>Status</th><th>Action</th></tr></thead><tbody>
                     {rows.map((transaction) => <tr key={transaction.id} className="tx-row">
                         <td data-label="Date & time"><span className="tx-date-cell">{dateTime(transaction.transaction_at)}</span></td>
-                        <td data-label="Provider / terminal"><span className="provider-cell compact"><ProviderLogo provider={transaction.provider} size="md" /><span><strong>{transaction.provider?.name || 'Provider'}</strong><small>{terminalLabel(transaction.provider?.name, transaction.terminal?.name)}</small></span></span></td>
+                        <td data-label="Provider / terminal"><span className="provider-cell compact"><ProviderLogo provider={transaction.provider} size="md" /><span><strong>{transaction.provider?.name || 'Provider'}</strong><small>{transaction.metadata?.activity_scope === 'personal_wallet' ? 'Personal wallet activity' : terminalLabel(transaction.provider?.name, transaction.terminal?.name)}</small></span></span></td>
                         <td data-label="Reference" className="reference-cell">{transaction.external_reference || 'Not supplied'}</td>
                         <td data-label="Amount" className="tx-principal">{money(transaction.amount)}</td>
-                        <td data-label="Earnings" className="tx-earnings"><strong>{money(transaction.estimated_earnings)}</strong>{transaction.financial_status?.is_final === false && <small>Provisional</small>}</td>
+                        <td data-label="Earnings" className="tx-earnings">{transaction.metadata?.activity_scope === 'personal_wallet' ? <small>Not POS earnings</small> : <><strong>{money(transaction.estimated_earnings)}</strong>{transaction.financial_status?.is_final === false && <small>Provisional</small>}</>}</td>
                         <td data-label="Status"><StatusBadge status={transaction.transaction_status} /></td>
                         <td data-label="Action" className="tx-row-link"><Link href={`/transactions/${transaction.id}`} aria-label={`View transaction ${transaction.external_reference || transaction.id}`}>View <span aria-hidden="true">→</span></Link></td>
                     </tr>)}

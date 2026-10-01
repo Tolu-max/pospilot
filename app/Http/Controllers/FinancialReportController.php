@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\TransactionStatus;
 use App\Models\Settlement;
 use App\Services\AgentFinancialSummaryService;
 use App\Services\EarningsService;
@@ -16,12 +17,33 @@ final class FinancialReportController extends Controller
 
     public function summary(Request $request): JsonResponse
     {
-        return response()->json($this->summary->summarize($this->agent($request), ...$this->dates($request)));
+        $agent = $this->agent($request);
+        [$from, $to] = $this->dates($request);
+        $counts = $agent->transactions()->posFinancial()
+            ->when($from, fn ($query) => $query->whereDate('transaction_at', '>=', $from))
+            ->when($to, fn ($query) => $query->whereDate('transaction_at', '<=', $to))
+            ->get(['transaction_status'])
+            ->countBy(fn ($transaction): string => $transaction->transaction_status->value);
+
+        return response()->json([
+            ...$this->summary->summarize($agent, $from, $to),
+            'status_counts' => [
+                'successful' => $counts->get(TransactionStatus::Successful->value, 0),
+                'pending' => $counts->get(TransactionStatus::Pending->value, 0),
+                'failed' => $counts->get(TransactionStatus::Failed->value, 0),
+                'reversed' => $counts->get(TransactionStatus::Reversed->value, 0),
+            ],
+        ]);
     }
 
     public function providerBreakdown(Request $request): JsonResponse
     {
         return response()->json(['data' => $this->earnings->byProvider($this->agent($request), ...$this->dates($request))]);
+    }
+
+    public function terminalProfitability(Request $request): JsonResponse
+    {
+        return response()->json($this->earnings->terminalProfitability($this->agent($request), ...$this->dates($request)));
     }
 
     public function reconciliationOverview(Request $request): JsonResponse
@@ -45,15 +67,19 @@ final class FinancialReportController extends Controller
     public function settlement(Request $request, Settlement $settlement): JsonResponse
     {
         abort_unless($settlement->agent_profile_id === $this->agent($request)->id, 404);
+        $record = $settlement->load(['provider', 'terminal', 'importBatch'])->toArray();
+        $record['provider_fee'] = $settlement->provider_fee_supplied ? $settlement->provider_fee : null;
+        $record['provider_fee_known'] = (bool) $settlement->provider_fee_supplied;
 
-        return response()->json(['settlement' => $settlement->load(['provider', 'terminal', 'importBatch']), 'reconciliation' => $this->reconciliation->compare($settlement)]);
+        return response()->json(['settlement' => $record, 'reconciliation' => $this->reconciliation->compare($settlement)]);
     }
 
     private function agent(Request $request)
     {
-        abort_unless($request->user()?->agentProfile, 404);
+        $agent = $request->user()?->businessAgentProfile();
+        abort_unless($agent !== null, 404);
 
-        return $request->user()->businessAgentProfile();
+        return $agent;
     }
 
     private function dates(Request $request): array

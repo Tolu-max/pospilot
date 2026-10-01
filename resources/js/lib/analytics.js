@@ -6,6 +6,8 @@ const safeEvents = Object.freeze({
     statement_sync_started: Object.freeze({ source: 'gmail' }),
     statement_imported: Object.freeze({ source: 'gmail' }),
     provider_connection_started: Object.freeze({ provider: 'moniepoint' }),
+    shift_started: Object.freeze({ feature: 'shift' }),
+    shift_closed: Object.freeze({ feature: 'shift' }),
     daily_closing_completed: Object.freeze({ feature: 'daily_closing' }),
 });
 

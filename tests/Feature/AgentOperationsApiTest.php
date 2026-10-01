@@ -6,6 +6,7 @@ use App\Enums\TransactionStatus;
 use App\Models\AgentProfile;
 use App\Models\ChargeRule;
 use App\Models\Provider;
+use App\Models\ProviderAccount;
 use App\Models\ProviderConnection;
 use App\Models\Terminal;
 use App\Models\Transaction;
@@ -37,6 +38,33 @@ class AgentOperationsApiTest extends TestCase
         $response = $this->actingAs($user)->postJson('/api/terminals', ['provider_id' => $provider->id, 'name' => 'My Terminal']);
         $response->assertCreated();
         $this->assertDatabaseHas('terminals', ['agent_profile_id' => $agent->id, 'name' => 'My Terminal']);
+    }
+
+    public function test_unassigned_statement_transaction_can_be_assigned_after_terminal_creation(): void
+    {
+        $user = User::factory()->create();
+        $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
+        $provider = Provider::factory()->create();
+        $account = ProviderAccount::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id]);
+        $transaction = Transaction::factory()->create([
+            'agent_profile_id' => $agent->id,
+            'provider_id' => $provider->id,
+            'provider_account_id' => $account->id,
+            'terminal_id' => null,
+            'source' => 'statement',
+        ]);
+
+        $terminalResponse = $this->actingAs($user)->postJson('/api/terminals', [
+            'provider_id' => $provider->id,
+            'name' => 'New OPay terminal',
+        ])->assertCreated()->assertJsonPath('provider_account_id', $account->id);
+
+        $this->patchJson('/transactions/'.$transaction->id.'/terminal', [
+            'terminal_id' => $terminalResponse->json('id'),
+        ])->assertOk()->assertJsonPath('terminal_id', $terminalResponse->json('id'));
+
+        $this->assertSame($terminalResponse->json('id'), $transaction->fresh()->terminal_id);
+        $this->assertNotEmpty($transaction->fresh()->metadata['terminal_assignment_history']);
     }
 
     public function test_charge_preview_obeys_boundary_and_priority_rules(): void
@@ -73,5 +101,25 @@ class AgentOperationsApiTest extends TestCase
         Transaction::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id, 'amount' => 1000, 'customer_charge' => 100, 'provider_fee' => 10, 'transaction_status' => 'successful', 'transaction_at' => now()]);
         $this->actingAs($user)->postJson('/api/expenses', ['amount' => '25.00', 'category' => 'power', 'expense_date' => now()->toDateString()])->assertCreated();
         $this->actingAs($user)->getJson('/api/financial-summary')->assertOk()->assertJsonPath('expenses', '25.00')->assertJsonPath('estimated_net_earnings', '65.00');
+    }
+
+    public function test_financial_status_counts_exclude_wallet_activity_and_other_businesses(): void
+    {
+        $user = User::factory()->create();
+        $agent = AgentProfile::factory()->create(['user_id' => $user->id]);
+        $otherAgent = AgentProfile::factory()->create();
+        $provider = Provider::factory()->create();
+        foreach (['successful', 'pending', 'failed', 'reversed'] as $status) {
+            Transaction::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id, 'transaction_status' => $status, 'transaction_at' => now()]);
+        }
+        Transaction::factory()->create(['agent_profile_id' => $agent->id, 'provider_id' => $provider->id, 'transaction_status' => 'successful', 'transaction_at' => now(), 'metadata' => ['activity_scope' => 'personal_wallet']]);
+        Transaction::factory()->create(['agent_profile_id' => $otherAgent->id, 'provider_id' => $provider->id, 'transaction_status' => 'failed', 'transaction_at' => now()]);
+
+        $this->actingAs($user)->getJson('/api/financial-summary?from='.today()->toDateString().'&to='.today()->toDateString())
+            ->assertOk()
+            ->assertJsonPath('status_counts.successful', 1)
+            ->assertJsonPath('status_counts.pending', 1)
+            ->assertJsonPath('status_counts.failed', 1)
+            ->assertJsonPath('status_counts.reversed', 1);
     }
 }

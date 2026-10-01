@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\BusinessShift;
 use App\Models\Expense;
 use App\Models\Terminal;
+use App\Services\SecurityEventRecorder;
+use App\Services\ShiftCashSummaryService;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +15,7 @@ use Illuminate\Validation\Rule;
 
 final class StaffShiftController extends Controller
 {
-    public function dashboard(Request $request): JsonResponse
+    public function dashboard(Request $request, ShiftCashSummaryService $cashSummary): JsonResponse
     {
         $membership = $request->user()->teamMembership;
         abort_unless($membership?->is_active, 403);
@@ -31,9 +33,10 @@ final class StaffShiftController extends Controller
             'staff_name' => $request->user()->name,
             'role' => $membership->role,
             'active_shift' => $activeShift,
+            'cash_summary' => $activeShift ? $cashSummary->forShift($activeShift) : null,
             'assigned_terminals' => $membership->terminals()->where('terminals.active', true)->with('provider:id,name')->orderBy('name')->get(['terminals.id', 'terminals.name', 'terminals.provider_id']),
             'transactions' => $transactions,
-            'recent_shifts' => $membership->shifts()->with('terminal:id,name')->latest('started_at')->limit(5)->get(),
+            'recent_shifts' => $membership->shifts()->with('terminal:id,name')->latest('started_at')->limit(5)->get()->map(fn (BusinessShift $shift): array => [...$shift->toArray(), 'cash_summary' => $cashSummary->forShift($shift)]),
         ]);
     }
 
@@ -77,15 +80,25 @@ final class StaffShiftController extends Controller
         return response()->json(['data' => $membership->terminals()->where('terminals.active', true)->with('provider:id,name')->orderBy('name')->get(['terminals.id', 'terminals.name', 'terminals.provider_id'])]);
     }
 
-    public function close(Request $request, BusinessShift $shift): JsonResponse
+    public function close(Request $request, BusinessShift $shift, SecurityEventRecorder $events, ShiftCashSummaryService $cashSummary): JsonResponse
     {
         $membership = $request->user()->teamMembership;
         abort_unless($membership?->is_active && $shift->business_membership_id === $membership->id, 404);
         abort_unless($shift->status === 'active', 422, 'This shift has already ended.');
-        $validated = $request->validate(['closing_cash' => ['required', 'regex:/^\d+(\.\d{1,2})?$/']]);
-        $shift->update(['closing_cash' => $validated['closing_cash'], 'ended_at' => now(), 'status' => 'closed']);
+        $validated = $request->validate([
+            'closing_cash' => ['required', 'regex:/^\d+(\.\d{1,2})?$/'],
+            'closing_notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        $shift->update([
+            'closing_cash' => $validated['closing_cash'],
+            'closing_notes' => $validated['closing_notes'] ?? null,
+            'ended_at' => now(),
+            'status' => 'closed',
+        ]);
+        $shift->refresh();
+        $events->record($request->user(), 'shift_closed', $request);
 
-        return response()->json($shift->fresh('terminal:id,name'));
+        return response()->json([...$shift->load('terminal:id,name')->toArray(), 'cash_summary' => $cashSummary->forShift($shift)]);
     }
 
     public function transactions(Request $request, BusinessShift $shift): JsonResponse
@@ -157,7 +170,7 @@ final class StaffShiftController extends Controller
         return response()->json($expense, 201);
     }
 
-    public function reportIssue(Request $request, BusinessShift $shift): JsonResponse
+    public function reportIssue(Request $request, BusinessShift $shift, SecurityEventRecorder $events): JsonResponse
     {
         $membership = $request->user()->teamMembership;
         abort_unless($membership?->is_active && $shift->business_membership_id === $membership->id, 404);
@@ -167,6 +180,7 @@ final class StaffShiftController extends Controller
             'business_membership_id' => $membership->id,
             'status' => 'open',
         ]);
+        $events->record($request->user(), 'shift_issue_reported', $request);
 
         return response()->json(['id' => $issue->id, 'subject' => $issue->subject, 'status' => $issue->status], 201);
     }
@@ -174,6 +188,7 @@ final class StaffShiftController extends Controller
     private function shiftTransactions(BusinessShift $shift): HasMany
     {
         return $shift->agentProfile->transactions()
+            ->posFinancial()
             ->where('terminal_id', $shift->terminal_id)
             ->where('transaction_at', '>=', $shift->started_at)
             ->when($shift->ended_at, fn ($query, $endedAt) => $query->where('transaction_at', '<=', $endedAt));

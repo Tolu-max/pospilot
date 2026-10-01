@@ -3,16 +3,22 @@ import { Head, Link, usePage } from '@inertiajs/react';
 import BrandLogo from '../Components/BrandLogo';
 import ToastViewport from '../Components/ToastViewport';
 
-const navigation = [
-    { href: '/dashboard', label: 'Home', icon: 'home' },
-    { href: '/transactions', label: 'Transactions', icon: 'transactions' },
-    { href: '/reconciliation', label: 'Reconciliation', icon: 'reconcile' },
-    { href: '/dashboard?screen=closing', label: 'Daily Closing', icon: 'closing' },
-    { href: '/dashboard?screen=providers', label: 'Providers', icon: 'providers' },
-    { href: '/dashboard?screen=expenses', label: 'Expenses', icon: 'expenses' },
-    { href: '/profile', label: 'Settings', icon: 'settings' },
-    { href: '/team', label: 'Team', icon: 'team' },
-];
+const navigationSections = {
+    owner: [
+        { label: null, items: [{ href: '/dashboard', label: 'Home', icon: 'home' }, { href: '/transactions', label: 'Transactions', icon: 'transactions' }] },
+        { label: 'OPERATIONS', items: [{ href: '/reconciliation', label: 'Reconciliation', icon: 'reconcile' }, { href: '/dashboard?screen=closing', label: 'Float & Closing', icon: 'closing' }, { href: '/dashboard?screen=issues', label: 'Issues', icon: 'issues' }] },
+        { label: 'BUSINESS', items: [{ href: '/dashboard?screen=providers', label: 'Providers', icon: 'providers' }, { href: '/dashboard?screen=expenses', label: 'Expenses', icon: 'expenses' }, { href: '/team', label: 'Team', icon: 'team' }, { href: '/dashboard?screen=reports', label: 'Reports', icon: 'reports' }] },
+        { label: null, items: [{ href: '/profile', label: 'Settings', icon: 'settings' }] },
+    ],
+    manager: [
+        { label: null, items: [{ href: '/dashboard', label: 'Home', icon: 'home' }, { href: '/transactions', label: 'Transactions', icon: 'transactions' }] },
+        { label: 'OPERATIONS', items: [{ href: '/reconciliation', label: 'Reconciliation', icon: 'reconcile' }, { href: '/dashboard?screen=closing', label: 'Float & Closing', icon: 'closing' }, { href: '/dashboard?screen=issues', label: 'Issues', icon: 'issues' }, { href: '/dashboard?screen=team-activity', label: 'Staff activity', icon: 'team' }] },
+        { label: 'BUSINESS', items: [{ href: '/dashboard?screen=expenses', label: 'Expenses', icon: 'expenses' }] },
+    ],
+    attendant: [
+        { label: null, items: [{ href: '/dashboard', label: 'Home', icon: 'home' }] },
+    ],
+};
 
 const icons = {
     home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-6h6v6"/></>,
@@ -23,6 +29,8 @@ const icons = {
     expenses: <><path d="M4 7h16v13H4zM7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><path d="M4 12h16M10 12v2h4v-2"/></>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.6.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.6-.9l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.9l-1.4-1.1 1.4-2.4 1.7.6a8 8 0 0 1 1.6-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.6.9l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 1.8Z" transform="translate(-1 -1)"/></>,
     team: <><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 2.2-5 6-5s6 2 6 5M16 5.2a3 3 0 0 1 0 5.6M18 15c2 .6 3 2.2 3 4"/></>,
+    issues: <><path d="M12 3 2.7 19h18.6L12 3Z"/><path d="M12 9v4m0 3h.01"/></>,
+    reports: <><path d="M4 19V5m0 14h16"/><path d="m7 15 4-4 3 2 5-6"/></>,
     menu: <><path d="M4 6h16M4 12h16M4 18h16"/></>,
     search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
     close: <><path d="m6 6 12 12M18 6 6 18"/></>,
@@ -35,7 +43,7 @@ function Icon({ name, size = 17 }) {
 
 export default function AppShell({ children, title = 'Home' }) {
     const page = usePage();
-    const { auth, userName, workspaceReady, workspace } = page.props;
+    const { auth, userName, workspaceReady, workspace, demoWorkspace } = page.props;
     const [menuOpen, setMenuOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const businessName = workspace?.business_name || '';
@@ -44,14 +52,10 @@ export default function AppShell({ children, title = 'Home' }) {
     const currentUrl = new URL(page.url || window.location.href, window.location.origin);
     const screen = currentUrl.searchParams.get('screen');
     const user = auth?.user;
-    const accountName = user?.name || userName || 'Your account';
+    const accountName = demoWorkspace ? 'Demo operator' : user?.name || userName || 'Your account';
     const isWorkspaceReady = workspaceReady === true;
     const role = workspace?.role || 'owner';
-    const visibleNavigation = role === 'owner'
-        ? navigation
-        : role === 'manager'
-            ? navigation.filter((item) => ['Home', 'Transactions', 'Reconciliation', 'Expenses'].includes(item.label)).concat([{ href: '/dashboard?screen=team-activity', label: 'Staff activity', icon: 'team' }])
-            : navigation.filter((item) => item.label === 'Home');
+    const visibleNavigation = navigationSections[role] || navigationSections.attendant;
 
     useEffect(() => {
         if (!accountOpen) {
@@ -91,7 +95,10 @@ export default function AppShell({ children, title = 'Home' }) {
         <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`} aria-label="POSPilot navigation">
             <div className="brand-row"><Link href="/dashboard" className="brand-lockup" onClick={() => setMenuOpen(false)} aria-label="POSPilot dashboard"><BrandLogo /></Link><button type="button" className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setMenuOpen(false)}><Icon name="close" /></button></div>
             <nav className="primary-nav" aria-label="Main navigation">
-                {isWorkspaceReady && visibleNavigation.map((item) => <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={isActive(item) ? 'page' : undefined} className={`nav-link ${isActive(item) ? 'nav-link-active' : ''}`}><Icon name={item.icon} /><span>{item.label}</span></Link>)}
+                {isWorkspaceReady && visibleNavigation.map((section, sectionIndex) => <div key={section.label || `main-${sectionIndex}`} className="nav-section">
+                    {section.label && <p className="nav-section-label">{section.label}</p>}
+                    {section.items.map((item) => <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={isActive(item) ? 'page' : undefined} className={`nav-link ${isActive(item) ? 'nav-link-active' : ''}`}><Icon name={item.icon} /><span>{item.label}</span></Link>)}
+                </div>)}
             </nav>
             <div className="sidebar-bottom">
                 <div className="sidebar-account-card">
@@ -119,7 +126,7 @@ export default function AppShell({ children, title = 'Home' }) {
                         {accountOpen && <div id="account-menu-panel" className="account-menu-panel">
                             <div className="account-menu-identity">
                                 <strong>{accountName}</strong>
-                                {user?.email && <span>{user.email}</span>}
+                                {!demoWorkspace && user?.email && <span>{user.email}</span>}
                                 <small>{businessName || 'Business workspace'}</small>
                             </div>
                             {isWorkspaceReady && role === 'owner' && <Link href="/profile" className="account-menu-link" onClick={() => setAccountOpen(false)}>Account settings</Link>}
@@ -128,6 +135,10 @@ export default function AppShell({ children, title = 'Home' }) {
                     </div>
                 </div>
             </header>
+            {demoWorkspace && <aside className="showcase-banner" role="note" aria-label="Demo workspace notice">
+                <strong>SHOWCASE DEMO</strong>
+                <span>Dashboard records are fictional samples for demonstration. Gmail is connected for flow testing; these sample rows were not imported from Gmail.</span>
+            </aside>}
             <div className="page-content">{children}</div>
         </main>
         <ToastViewport />

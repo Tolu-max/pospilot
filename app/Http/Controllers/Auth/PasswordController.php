@@ -25,12 +25,15 @@ class PasswordController extends Controller
         SecurityEventRecorder $events,
         TransactionalEmailDelivery $delivery,
     ): RedirectResponse {
+        $hasExistingPassword = filled($request->user()->getAuthPassword());
         $validated = $request->validate([
-            'current_password' => ['required', 'current_password'],
+            'current_password' => $hasExistingPassword ? ['required', 'current_password'] : ['nullable'],
             'password' => ['required', Password::defaults(), 'confirmed'],
         ]);
 
-        Auth::guard('web')->logoutOtherDevices($validated['current_password']);
+        if ($hasExistingPassword) {
+            Auth::guard('web')->logoutOtherDevices($validated['current_password']);
+        }
 
         $request->user()->update([
             'password' => Hash::make($validated['password']),

@@ -55,6 +55,10 @@ final class EarningsService
 
     public function transactionContribution(Transaction $transaction): string
     {
+        if (($transaction->metadata['activity_scope'] ?? null) === 'personal_wallet') {
+            return '0.00';
+        }
+
         if ($transaction->transaction_status !== TransactionStatus::Successful) {
             return '0.00';
         }
@@ -92,16 +96,43 @@ final class EarningsService
 
     public function byTerminal(AgentProfile $agent, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
     {
-        return $this->successfulTransactions($agent, $from, $to)->load('terminal')->groupBy('terminal_id')->map(function ($items, $terminalId): array {
+        return $this->successfulTransactions($agent, $from, $to)->load(['terminal', 'provider'])->groupBy('terminal_id')->map(function ($items, $terminalId): array {
             $totals = $this->financialTotals($items);
+            $financialStatus = $this->financialStatus->summarize($items);
+            $providerFeeKnown = ! collect($financialStatus['provisional_reasons'])->contains(fn (array $reason): bool => in_array($reason['code'], ['provider_fee_missing', 'provider_fee_components_incomplete'], true));
 
-            return ['terminal_id' => $terminalId, 'transaction_count' => $items->count(), 'customer_charges' => $totals['customer_charges'], 'provider_fees' => $totals['provider_fees'], 'other_transaction_credits' => $totals['other_credits'], 'estimated_earnings' => Money::add(Money::subtract($totals['customer_charges'], $totals['provider_fees']), $totals['other_credits']), ...$this->financialStatus->summarize($items)];
+            return ['terminal_id' => $terminalId, 'terminal' => $items->first()->terminal?->name ?? 'Terminal not mapped', 'provider' => $items->first()->provider->name, 'transaction_volume' => $this->sum($items, 'amount'), 'transaction_count' => $items->count(), 'customer_charges' => $totals['customer_charges'], 'provider_fees' => $totals['provider_fees'], 'provider_fee_known' => $providerFeeKnown, 'other_transaction_credits' => $totals['other_credits'], 'estimated_earnings' => Money::add(Money::subtract($totals['customer_charges'], $totals['provider_fees']), $totals['other_credits']), ...$financialStatus];
         })->values()->all();
+    }
+
+    /** @return array{data:list<array<string,mixed>>,unallocated_expenses:string,expense_attribution_complete:bool} */
+    public function terminalProfitability(AgentProfile $agent, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
+    {
+        $expenses = $agent->expenses()
+            ->when($from, fn ($query) => $query->whereDate('expense_date', '>=', $from))
+            ->when($to, fn ($query) => $query->whereDate('expense_date', '<=', $to))
+            ->get(['terminal_id', 'amount']);
+        $unallocatedExpenses = $expenses->whereNull('terminal_id')->reduce(fn (string $total, $expense): string => Money::add($total, $expense->amount), '0.00');
+        $allocatedExpenses = $expenses->whereNotNull('terminal_id')->groupBy('terminal_id');
+        $expenseAttributionComplete = Money::compare($unallocatedExpenses, '0.00') === 0;
+        $rows = collect($this->byTerminal($agent, $from, $to))->map(function (array $row) use ($allocatedExpenses, $expenseAttributionComplete): array {
+            $terminalExpenses = ($allocatedExpenses->get($row['terminal_id']) ?? collect())->reduce(fn (string $total, $expense): string => Money::add($total, $expense->amount), '0.00');
+
+            return [
+                ...$row,
+                'allocated_expenses' => $terminalExpenses,
+                'estimated_net_after_expenses' => Money::subtract($row['estimated_earnings'], $terminalExpenses),
+                'expense_attribution_complete' => $expenseAttributionComplete,
+                'is_final' => $row['is_final'] && $expenseAttributionComplete,
+            ];
+        })->values()->all();
+
+        return ['data' => $rows, 'unallocated_expenses' => $unallocatedExpenses, 'expense_attribution_complete' => $expenseAttributionComplete];
     }
 
     private function successfulTransactions(AgentProfile $agent, ?CarbonImmutable $from, ?CarbonImmutable $to): Collection
     {
-        return $agent->transactions()->with('adjustments')->where('transaction_status', TransactionStatus::Successful->value)->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
+        return $agent->transactions()->posFinancial()->with('adjustments')->where('transaction_status', TransactionStatus::Successful->value)->when($from, fn ($q) => $q->whereDate('transaction_at', '>=', $from))->when($to, fn ($q) => $q->whereDate('transaction_at', '<=', $to))->get();
     }
 
     /** @param Collection<int, Transaction> $transactions

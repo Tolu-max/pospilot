@@ -101,7 +101,7 @@ final class DailyClosingService
 
     private function calculate(AgentProfile $agent, CarbonImmutable $date, ?DailyClosing $closing): array
     {
-        $transactions = $agent->transactions()->with('adjustments')->whereDate('transaction_at', $date)->get();
+        $transactions = $agent->transactions()->posFinancial()->with('adjustments')->whereDate('transaction_at', $date)->get();
         $successful = $transactions->where('transaction_status', TransactionStatus::Successful);
         $pendingCount = $transactions->where('transaction_status', TransactionStatus::Pending)->count();
         $reversedCount = $transactions->where('transaction_status', TransactionStatus::Reversed)->count();
@@ -176,7 +176,7 @@ final class DailyClosingService
 
     private function expectedForSnapshot(AgentProfile $agent, CarbonImmutable $date, int $providerId, ?int $terminalId): string
     {
-        $transactions = $agent->transactions()->with('adjustments')->where('provider_id', $providerId)->whereDate('transaction_at', $date)->where('transaction_status', TransactionStatus::Successful->value)->when($terminalId, fn ($q) => $q->where('terminal_id', $terminalId))->get();
+        $transactions = $agent->transactions()->posFinancial()->with('adjustments')->where('provider_id', $providerId)->whereDate('transaction_at', $date)->where('transaction_status', TransactionStatus::Successful->value)->when($terminalId, fn ($q) => $q->where('terminal_id', $terminalId))->get();
 
         return $transactions->reduce(function (string $total, $transaction): string {
             $financials = $this->components->summarize($transaction);

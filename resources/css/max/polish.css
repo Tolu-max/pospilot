@@ -202,6 +202,16 @@
 .nav-link-active { box-shadow: inset 3px 0 #a9e0c0; }
 .nav-link svg { transition: transform .17s ease, color .17s ease; }
 .nav-link:hover svg { transform: translateX(1px); }
+
+/* Six financial measures remain scannable without shrinking the figures. */
+.dashboard .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dashboard .metric-card { min-width: 0; }
+.dashboard .metric-value { max-width: 100%; overflow-wrap: anywhere; white-space: normal; font-variant-numeric: tabular-nums; }
+.dashboard .metric-title { white-space: normal; }
+.dashboard .metric-card:nth-child(n+5) { animation-delay: .2s; }
+@media (min-width: 721px) and (max-width: 1100px) { .dashboard .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .dashboard .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.dashboard .metric-card { gap: 10px; }.dashboard .metric-value { font-size: clamp(19px, 5vw, 25px); } }
+@media (max-width: 390px) { .dashboard .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.dashboard .metric-card { padding: 12px; }.dashboard .metric-icon { display: none; }.dashboard .metric-detail { font-size: 11px; } }
 .profile-button, .sidebar-logout, .icon-button { transition: color .17s ease, background-color .17s ease, border-color .17s ease, transform .16s ease; }
 .icon-button:active, .sidebar-logout:active { transform: scale(.97); }
 .popover { transform-origin: top right; animation: motion-soft-scale .16s ease-out both; }
@@ -258,3 +268,7 @@
     .workflow-item:hover, .capability-card:hover, .public-button:hover, .tx-row-link a:hover, .public-footer nav a:hover { transform: none !important; }
     .public-nav { transform: none; }
 }
+.showcase-banner { display: flex; align-items: center; gap: 12px; margin: 18px 32px 0; padding: 12px 15px; border: 1px solid #f2d98e; border-radius: 10px; color: #573f0b; background: #fff9e8; font-size: 13px; line-height: 1.45; }
+.showcase-banner strong { flex: none; font-size: 10px; letter-spacing: .09em; }
+@media (max-width: 1100px) { .showcase-banner { margin-inline: 22px; } }
+@media (max-width: 720px) { .showcase-banner { align-items: flex-start; flex-direction: column; gap: 4px; margin: 12px 14px 0; padding: 11px 12px; font-size: 12px; } }
