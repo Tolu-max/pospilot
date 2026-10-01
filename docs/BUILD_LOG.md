@@ -147,3 +147,10 @@
 - Production Composer dependencies installed from the unchanged lockfile. Migrations `2026_09_30_152903_add_account_classification_fields_to_statement_mapping_profiles_table` and `2026_09_30_154732_create_provider_accounts_table` completed. Laravel config, route, and view caches rebuilt.
 - The release script's HTTPS smoke checks for the application root and Vite manifest passed. Full PHPUnit suite was interrupted before completion; focused Gmail statement tests passed with 21 tests and 163 assertions before deployment. The complete production browser journey has not been re-tested in this release.
 - At the owner's request for hackathon presentation, added 30 fictional transactions and 15 settlement records to the separate `POSPilot Demo Business` workspace. Records use the `demo` source and fictional metadata; Gmail import counts remain unchanged. Chrome confirmed the live dashboard displays sample activity, provisional earnings, and demo reconciliation items. No statement contents were used.
+
+## 2026-10-01 - Public hackathon demo release
+
+- Activated isolated Go54 release `20261001-073807-4d5be31`; previous release `20260930-203638-c3ddd92` remains available. No local `.env` or demo database records were uploaded or seeded.
+- Added `/demo`, a public read-only Inertia showcase with clearly labeled fictional figures and no access to authenticated account or Gmail data. Added links from the sign-in and public landing pages. The authenticated `POSPilot Demo Business` workspace also displays a persistent fictional-data banner and uses a generic demo operator label.
+- No migrations were required. Composer dependencies, Laravel config/routes/views caches, and the built frontend assets were handled by the Go54 release workflow. The deployment smoke checks passed.
+- Chrome confirmed the live public demo page renders at `https://pospilot.tconnect.com.ng/demo`. Focused tests passed: 8 tests and 95 assertions. Vite build, Pint, Composer audit, and `git diff --check` passed before the public demo addition; focused tests/build/Pint/diff check passed after it. The complete suite was not run for this presentation-only release.
