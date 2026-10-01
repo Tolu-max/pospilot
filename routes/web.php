@@ -34,6 +34,8 @@ Route::get('/', function () {
     ]);
 });
 
+Route::get('/demo', fn () => Inertia::render('Demo/Showcase'))->name('demo.show');
+
 Route::get('/privacy', fn () => Inertia::render('Privacy'))->name('privacy');
 Route::get('/team/invitations/{token}', [TeamInvitationController::class, 'show'])->name('team.invitations.show');
 Route::post('/team/invitations/{token}/accept', [TeamInvitationController::class, 'accept'])->middleware('throttle:10,1')->name('team.invitations.accept');

@@ -22,6 +22,12 @@ export default function Login({ status, canResetPassword }) {
             <h1 className="text-2xl font-black">Sign in to POSPilot</h1>
             <p className="mt-2 text-sm leading-6 text-slate-600">Pick up where you left off and get a clear view of your POS business records.</p>
 
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-bold text-amber-950">Just here to see the hackathon showcase?</p>
+                <p className="mt-1 text-sm text-amber-900">Open the read-only demo dashboard. It uses fictional sample records and does not require an account.</p>
+                <Link href="/demo" className="mt-3 inline-flex min-h-11 items-center font-bold text-emerald-800 underline underline-offset-4">View demo dashboard</Link>
+            </div>
+
             {status && <div className="mt-5"><Notice tone="success">{status}</Notice></div>}
 
             <a href="/auth/google/redirect" onClick={() => setRedirectingToGoogle(true)} aria-busy={redirectingToGoogle} className="mt-6 flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-brand-line bg-white px-4 font-bold text-slate-700 transition-colors hover:bg-brand-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2">

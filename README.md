@@ -36,7 +36,7 @@ Direct provider API access is optional. Ordinary agents can use POSPilot’s ope
 
 The application can be seeded with fictional transactions and settlements to demonstrate the dashboard, reconciliation, and closing flows. Seeded records are explicitly marked as demo data; they are not real provider activity and are not imported from Gmail. Keep demo data separate from a user’s actual business records. Do not use production seeding to overwrite or mix with real user data. The dedicated live showcase workspace is labeled **SHOWCASE DEMO** in the authenticated app; its dashboard uses fictional sample records, while Gmail connection status is shown separately and is not presented as the source of those samples. The demo label does not change normal account registration, sign-in, or access controls.
 
-The live hackathon demo is at [pospilot.tconnect.com.ng](https://pospilot.tconnect.com.ng). The project team provides access to the live showcase account separately; local seeded credentials are not production credentials and must never be used on the live site.
+The public, read-only hackathon dashboard is available at [pospilot.tconnect.com.ng/demo](https://pospilot.tconnect.com.ng/demo) without signing in. It contains fictional sample figures and does not use Gmail or account records. The authenticated showcase workspace is separate; the project team provides access to it separately. Local seeded credentials are not production credentials and must never be used on the live site.
 
 ## Local setup
 
